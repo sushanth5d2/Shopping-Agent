@@ -133,3 +133,59 @@ You can skip installation and go straight to:
 cd /workspaces/Shopping-Agent
 docker compose up -d --build
 ```
+
+
+
+
+
+old docker compose 
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shopagent
+      POSTGRES_USER: shopagent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - shopagent_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopagent -d shopagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD}@db:5432/shopagent
+      SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:?Set SHOPAGENT_JWT_SECRET in .env}
+      SHOPAGENT_CORS_ORIGINS: ${SHOPAGENT_CORS_ORIGINS:-http://localhost:3000}
+    ports: ["8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+
+  monitoring-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    environment:
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD}@db:5432/shopagent
+      SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:?Set SHOPAGENT_JWT_SECRET in .env}
+      SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
+      SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
+    depends_on:
+      db: {condition: service_healthy}
+      backend: {condition: service_started}
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports: ["3000:3000"]
+    depends_on: [backend]
+
+volumes:
+  shopagent_pg:
+
