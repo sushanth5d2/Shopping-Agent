@@ -204,3 +204,9 @@ Then open:
 http://localhost:3000
 http://localhost:8000/docs
 ```
+
+
+
+cd /workspaces/Shopping-Agent && docker compose down -v --remove-orphans && docker compose up -d --build
+curl -fsS --retry 20 --retry-delay 2 --retry-connrefused http://localhost:8000/api/health
+curl -fsS -I --retry 20 --retry-delay 2 --retry-connrefused http://localhost:3000
