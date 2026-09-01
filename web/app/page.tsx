@@ -1,7 +1,7 @@
 'use client';
 
+// Shopping Agent - Personal AI Shopping Assistant
 import { useEffect, useMemo, useState } from 'react';
-import { localAIStatus, localShoppingIntent, BROWSER_MODELS, getSelectedBrowserModel, setSelectedBrowserModel } from '../lib/local-ai';
 import {
   Activity, Bell, Bot, Check, ChevronDown, CircleDollarSign, Clock3, ExternalLink,
   LayoutDashboard, ListChecks, LogOut, Menu, Package, Search, Settings, Sparkles,
@@ -16,7 +16,19 @@ type Item = {
   current_price:number|null; decision:any;
 };
 
-type Listing = { listing_id?:number; store:string; true_total:number; price:number; delivery:number; seller:string; seller_rating:number; warranty?:string; returns?:string; url?:string; };
+type Listing = {
+  listing_id?: number;
+  store: string;
+  true_total: number;
+  price: number;
+  delivery: number;
+  seller: string;
+  seller_rating: number;
+  warranty?: string;
+  returns?: string;
+  url?: string;
+  match_score?: number;
+};
 
 async function req(path:string,opt:RequestInit={}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('sa_access') : null;
@@ -53,24 +65,146 @@ export default function App(){
       setData(d);setItems(i.items||[]);setMonitor(m.items||[]);setOrders(o||[]);setActivity(a||[]);setDeals(de.deals||[]);setAuthed(true); try{setAiStatus(await req('/api/ai/status'))}catch{}
     }catch{ setAuthed(false); }
   };
-  useEffect(()=>{ if(localStorage.getItem('sa_access')) load(); localAIStatus().then(()=>setLocalAIReady(true)).catch(()=>setLocalAIReady(false)); },[]);
+  useEffect(() => {
+    if (localStorage.getItem('sa_access')) load();
+  }, []);
   useEffect(()=>{ if(!toast)return; const t=setTimeout(()=>setToast(''),3500); return()=>clearTimeout(t); },[toast]);
 
-  const auth=async()=>{setBusy(true);try{const x=await req(`/api/auth/${mode==='login'?'login':'register'}`,{method:'POST',body:JSON.stringify({email,password})});localStorage.setItem('sa_access',x.access_token);localStorage.setItem('sa_refresh',x.refresh_token);await load();}catch(e:any){setToast(e.message)}finally{setBusy(false)}};
-  const analyzeUrl=async(monitor=false)=>{if(!productUrl.trim())return;setUrlBusy(true);try{const x=await req('/api/products/url-analyze',{method:'POST',body:JSON.stringify({url:productUrl.trim(),monitor})});setUrlResult(x);setCompare(x.comparison);setTab('Compare');setProductUrl('');await load();setToast(monitor?'Product analyzed and monitoring started':'Product analyzed and compared');}catch(e:any){setToast(e.message)}finally{setUrlBusy(false)}};
-  const processBatch=async()=>{
-    const target=batchTarget.trim()?Number(batchTarget):undefined;
-    const urls=batchUrls.split(/\n|,/) .map(x=>x.trim()).filter(Boolean).map(url=>({url,monitor:batchMonitor,target_price:Number.isFinite(target as number)?target:undefined}));
-    const todo_items=batchItems.split(/\n/).map(x=>x.trim()).filter(Boolean);
-    if(!urls.length&&!todo_items.length){setToast('Add at least one URL or To-Buy item');return;}
-    setBatchBusy(true);
-    try{const x=await req('/api/batch/process',{method:'POST',body:JSON.stringify({urls,todo_items})});setBatchResult(x);setBatchUrls('');setBatchItems('');setBatchTarget('');await load();setToast(`Processed ${x.summary.urls_succeeded} URLs and ${x.summary.todo_created} To-Buy items`);}catch(e:any){setToast(e.message)}finally{setBatchBusy(false)}
+  const auth = async () => {
+    setBusy(true);
+    try {
+      const authMode = mode === 'login' ? 'login' : 'register';
+      const x = await req(`/api/auth/${authMode}`, {
+        method: 'POST',
+        body: JSON.stringify({ email, password })
+      });
+      localStorage.setItem('sa_access', x.access_token);
+      localStorage.setItem('sa_refresh', x.refresh_token);
+      await load();
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
-  const run=async()=>{if(!input.trim())return;setBusy(true);try{let text=input.trim(); if(localAIReady){setLocalAILoading(true); try { const normalized=await localShoppingIntent(text); if(normalized) text=normalized; } catch(e) { /* deterministic server parser remains the safety fallback */ } finally { setLocalAILoading(false); }} await req('/api/intent',{method:'POST',body:JSON.stringify({text}));setInput('');await load();setToast(localAIReady?'Local AI processed your request':'Shopping plan updated');}catch(e:any){setToast(e.message)}finally{setBusy(false)}};
-  const buy=async(id:number)=>{setBusy(true);try{const x=await req(`/api/items/${id}/checkout`,{method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()}});setToast(x.message||'Checkout completed');await load();}catch(e:any){setToast(e.message)}finally{setBusy(false)}};
-  const startMonitor=async(id:number)=>{try{await req(`/api/items/${id}/monitor`,{method:'POST'});await load();setToast('Monitoring started');}catch(e:any){setToast(e.message)}};
-  const compareItem=async(i:Item)=>{if(!i.product_id){setToast('No matched product yet. Add a supported product URL or clearer product name.');return}try{setCompare(await req(`/api/products/${i.product_id}/compare`));setTab('Compare')}catch(e:any){setToast(e.message)}};
-  const signout=()=>{localStorage.clear();setAuthed(false);setCompare(null);setTab('Home')};
+
+  const analyzeUrl = async (monitor = false) => {
+    if (!productUrl.trim()) return;
+    setUrlBusy(true);
+    try {
+      const x = await req('/api/products/url-analyze', {
+        method: 'POST',
+        body: JSON.stringify({ url: productUrl.trim(), monitor })
+      });
+      setUrlResult(x);
+      setCompare(x.comparison);
+      setTab('Compare');
+      setProductUrl('');
+      await load();
+      setToast(monitor ? 'Product analyzed and monitoring started' : 'Product analyzed and compared');
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setUrlBusy(false);
+    }
+  };
+
+  const processBatch = async () => {
+    const target = batchTarget.trim() ? Number(batchTarget) : undefined;
+    const urls = batchUrls.split(/\n|,/).map(x => x.trim()).filter(Boolean).map(url => ({
+      url,
+      monitor: batchMonitor,
+      target_price: Number.isFinite(target as number) ? target : undefined
+    }));
+    const todo_items = batchItems.split(/\n/).map(x => x.trim()).filter(Boolean);
+    if (!urls.length && !todo_items.length) {
+      setToast('Add at least one URL or To-Buy item');
+      return;
+    }
+    setBatchBusy(true);
+    try {
+      const x = await req('/api/batch/process', {
+        method: 'POST',
+        body: JSON.stringify({ urls, todo_items })
+      });
+      setBatchResult(x);
+      setBatchUrls('');
+      setBatchItems('');
+      setBatchTarget('');
+      await load();
+      setToast(`Processed ${x.summary.urls_succeeded} URLs and ${x.summary.todo_created} To-Buy items`);
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  const run = async () => {
+    if (!input.trim()) return;
+    setBusy(true);
+    try {
+      let text = input.trim();
+      // Local AI disabled for now due to bundling constraints
+      await req('/api/intent', {
+        method: 'POST',
+        body: JSON.stringify({ text })
+      });
+      setInput('');
+      await load();
+      setToast('Shopping plan updated');
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const buy = async (id: number) => {
+    setBusy(true);
+    try {
+      const x = await req(`/api/items/${id}/checkout`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() }
+      });
+      setToast(x.message || 'Checkout completed');
+      await load();
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startMonitor = async (id: number) => {
+    try {
+      await req(`/api/items/${id}/monitor`, { method: 'POST' });
+      await load();
+      setToast('Monitoring started');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const compareItem = async (i: Item) => {
+    if (!i.product_id) {
+      setToast('No matched product yet. Add a supported product URL or clearer product name.');
+      return;
+    }
+    try {
+      setCompare(await req(`/api/products/${i.product_id}/compare`));
+      setTab('Compare');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const signout = () => {
+    localStorage.clear();
+    setAuthed(false);
+    setCompare(null);
+    setTab('Home');
+  };
 
   if(!authed) return <Auth mode={mode} setMode={setMode} email={email} setEmail={setEmail} password={password} setPassword={setPassword} auth={auth} busy={busy} toast={toast}/>;
 
@@ -115,7 +249,7 @@ export default function App(){
 function Auth({mode,setMode,email,setEmail,password,setPassword,auth,busy,toast}:any){return <div className="auth-page"><div className="auth-glow"/><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark"><Sparkles size={17}/></span><div><b>ShopAgent</b><small>personal shopping AI</small></div></div><span className="eyebrow">PRIVATE SHOPPING COMMAND CENTER</span><h1>{mode==='login'?'Welcome back.':'Create your account.'}</h1><p>One place to search, compare, monitor and control your shopping.</p><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"/></label><button className="primary wide" onClick={auth} disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':'Create account'}</button><button className="switch" onClick={()=>setMode(mode==='login'?'register':'login')}>{mode==='login'?'Create a new account':'I already have an account'}</button>{toast&&<div className="auth-error">{toast}</div>}</div></div>}
 
 function Home({input,setInput,run,busy,stats,todo,activity,compareItem,buy,startMonitor,setTab,productUrl,setProductUrl,analyzeUrl,urlBusy}:any){return <div className="stack">
-  <section className="hero"><div className="hero-copy"><span className="hero-badge"><Sparkles size={13}/> AI SHOPPING COMMAND CENTER</span><h2>Don't shop.<br/><span>Tell ShopAgent.</span></h2><p>Describe what you need. ShopAgent finds matching products, compares verified listings, monitors prices when you ask, and keeps every purchase inside your rules.</p><div className="command"><Search size={19}/><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Try: Monitor Sony WH-1000XM6 below ₹25,000…"/><div className="text-xs text-white/60 mb-2">{localAIReady ? '● Built-in Local AI · no API key' : 'Local AI unavailable · server fallback active'}{localAILoading ? ' · loading model…' : ''}</div><button onClick={run} disabled={busy}>{busy?'Running…':<>Run agent <Zap size={15}/></>}</button></div><div className="suggestions"><button onClick={()=>setInput('Find the cheapest 5kg basmati rice')}>Cheapest rice</button><button onClick={()=>setInput('Monitor Sony WH-1000XM6 below ₹25,000 and ask me before buying')}>Monitor headphones</button><button onClick={()=>setInput('Buy USB-C cable under ₹500')}>Buy cable</button></div><div className="url-intake"><div className="url-intake-head"><div><span className="eyebrow">PRODUCT URL INTELLIGENCE</span><b>Paste a product link</b><small>ShopAgent reads the source page, identifies the exact variant, finds live alternatives, and can start monitoring it.</small></div><span className="url-badge">LIVE WEB</span></div><div className="url-command"><span>↗</span><input value={productUrl} onChange={e=>setProductUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&analyzeUrl(false)} placeholder="https://store.com/product/..."/><button onClick={()=>analyzeUrl(false)} disabled={urlBusy}>{urlBusy?'Analyzing…':'Compare'}</button><button className="url-monitor" onClick={()=>analyzeUrl(true)} disabled={urlBusy}>Compare + Monitor</button></div></div></div><div className="hero-visual"><div className="visual-ring ring-a"/><div className="visual-ring ring-b"/><div className="visual-core"><Bot size={40}/><span>AI</span></div><div className="float-card fc-one"><Target size={15}/><div><b>Price target</b><span>Watching</span></div></div><div className="float-card fc-two"><TrendingDown size={15}/><div><b>Best price</b><span>Verified</span></div></div></div></section>
+  <section className="hero"><div className="hero-copy"><span className="hero-badge"><Sparkles size={13}/> AI SHOPPING COMMAND CENTER</span><h2>Don't shop.<br/><span>Tell ShopAgent.</span></h2><p>Describe what you need. ShopAgent finds matching products, compares verified listings, monitors prices when you ask, and keeps every purchase inside your rules.</p><div className="command"><Search size={19}/><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Try: Monitor Sony WH-1000XM6 below ₹25,000…"/><div className="text-xs text-white/60 mb-2">Local AI unavailable · server fallback active</div><button onClick={run} disabled={busy}>{busy?'Running…':<>Run agent <Zap size={15}/></>}</button></div><div className="suggestions"><button onClick={()=>setInput('Find the cheapest 5kg basmati rice')}>Cheapest rice</button><button onClick={()=>setInput('Monitor Sony WH-1000XM6 below ₹25,000 and ask me before buying')}>Monitor headphones</button><button onClick={()=>setInput('Buy USB-C cable under ₹500')}>Buy cable</button></div><div className="url-intake"><div className="url-intake-head"><div><span className="eyebrow">PRODUCT URL INTELLIGENCE</span><b>Paste a product link</b><small>ShopAgent reads the source page, identifies the exact variant, finds live alternatives, and can start monitoring it.</small></div><span className="url-badge">LIVE WEB</span></div><div className="url-command"><span>↗</span><input value={productUrl} onChange={e=>setProductUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&analyzeUrl(false)} placeholder="https://store.com/product/..."/><button onClick={()=>analyzeUrl(false)} disabled={urlBusy}>{urlBusy?'Analyzing…':'Compare'}</button><button className="url-monitor" onClick={()=>analyzeUrl(true)} disabled={urlBusy}>Compare + Monitor</button></div></div></div><div className="hero-visual"><div className="visual-ring ring-a"/><div className="visual-ring ring-b"/><div className="visual-core"><Bot size={40}/><span>AI</span></div><div className="float-card fc-one"><Target size={15}/><div><b>Price target</b><span>Watching</span></div></div><div className="float-card fc-two"><TrendingDown size={15}/><div><b>Best price</b><span>Verified</span></div></div></div></section>
   <div className="stat-grid">{stats.map(([label,value,Icon,kind]:any)=><div className="stat-card" key={label}><div><span>{label}</span><b>{value}</b><small>{label==='Monitoring'?'Automatic checks':label==='Verified savings'?'From recorded prices':label==='Orders'?'Purchase history':'Active shopping plan'}</small></div><div className={`stat-icon ${kind}`}><Icon size={18}/></div></div>)}</div>
   <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><span className="eyebrow">YOUR SHOPPING PLAN</span><h3>To-Buy</h3></div><button className="link-btn" onClick={()=>setTab('To-Buy')}>View all <ChevronDown size={14}/></button></div>{todo.length?todo.slice(0,5).map((i:Item)=><ProductRow key={i.id} item={i} compare={()=>compareItem(i)} buy={()=>buy(i.id)} monitor={()=>startMonitor(i.id)}/>):<Empty icon={ListChecks} text="Your To-Buy list is clear." action="Add something" onClick={()=>document.querySelector<HTMLInputElement>('.command input')?.focus()}/>}</section><section className="panel"><div className="panel-head"><div><span className="eyebrow">TRANSPARENT AGENT</span><h3>Live activity</h3></div><button className="link-btn" onClick={()=>setTab('Agent Activity')}>View all <ChevronDown size={14}/></button></div><ActivityMini rows={activity}/></section></div>
 </div>}
@@ -155,7 +289,7 @@ function ActivityPage({rows}:any){return <div className="stack"><PageTitle eyebr
 
 function Compare({data,back}:any){return <div className="stack"><button className="back-btn" onClick={back}>← Back to To-Buy</button>{data?<><PageTitle eyebrow="TRUE PRICE ENGINE" title={data.product} meta={<span className={`decision ${data.decision?.decision==='BUY'?'buy':'wait'}`}>{data.decision?.decision}</span>}/><div className="decision-banner"><div><b>{data.decision?.decision}</b><span>{data.decision?.reason}</span></div><span className="banner-label">PRICE DECISION</span></div><div className="listing-grid">{(data.listings||[]).map((l:Listing,i:number)=><div className={`listing-card ${i===0?'best':''}`} key={l.listing_id||l.store}><div className="listing-head"><div><span className="store-label">{l.store}</span>{i===0&&<span className="best-tag">BEST TOTAL</span>}</div><span className="match">{l.match_score||'—'}% match</span></div><div className="listing-price">₹{Number(l.true_total).toLocaleString()}</div><div className="price-breakdown"><div><span>Product</span><b>₹{Number(l.price).toLocaleString()}</b></div><div><span>Delivery</span><b>{l.delivery?'₹'+l.delivery:'FREE'}</b></div><div><span>Seller</span><b>{l.seller} · {l.seller_rating}</b></div><div><span>Warranty</span><b>{l.warranty||'Not provided'}</b></div><div><span>Returns</span><b>{l.returns||'Not provided'}</b></div></div>{l.url&&<a className="retailer-link" href={l.url} target="_blank" rel="noreferrer">Open retailer <ExternalLink size={14}/></a>}</div>)}</div><div className="source-note"><b>Source provenance</b><span>Every price card links to its original product page. Unverified search snippets are never used as a price.</span></div></>:<Empty text="Select a product to compare."/>}</div>}
 
-function SettingsPage({dark,setDark,aiStatus}:any){return <div className="stack"><PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety first"/><div className="settings-grid"><div className="panel"><div className="panel-head"><div><span className="eyebrow">AI ENGINE</span><h3>Local + API AI</h3></div></div><div className="safety-box"><Bot size={18}/><div><b>{aiStatus?.configured_provider==='ollama'?'Ollama local AI':'Hosted API AI'}</b><span>{aiStatus?.ollama?.available?`Ollama online • ${aiStatus.ollama.model}`:'Ollama not detected'} {aiStatus?.api?.configured?'• API key configured':''}</span></div><span className={`status ${aiStatus?.ollama?.available?'green':'purple'}`}>{aiStatus?.ollama?.available?'LOCAL READY':'CONFIGURE'}</span></div><div className="setting-row"><div><b>Free/local mode</b><small>Run supported open-weight models locally through Ollama with no paid AI API.</small></div><span className="status green">SUPPORTED</span></div><div className="setting-row"><div><b>Hosted API mode</b><small>Use an OpenAI-compatible provider when higher-capability cloud reasoning is preferred.</small></div><span className="status blue">OPTIONAL</span></div><div className="setting-row"><div><b>Built-in browser models</b><small>Free local inference; choose a supported model. The selected model is cached in this browser.</small><select className="model-select" defaultValue={getSelectedBrowserModel()} onChange={e=>{setSelectedBrowserModel(e.target.value);window.location.reload();}}>{BROWSER_MODELS.map(m=><option key={m.id} value={m.id}>{m.name} · {m.device}</option>)}</select></div><span className="status green">NO API</span></div><div className="setting-row"><div><b>Ollama models</b><small>{(aiStatus?.ollama?.models||[]).length ? (aiStatus.ollama.models as string[]).join(', ') : 'Install any compatible Ollama model locally; ShopAgent discovers installed models automatically.'}</small></div><span className="status green">LOCAL</span></div></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">APPEARANCE</span><h3>Interface</h3></div></div><SettingToggle title="Dark mode" text="Use the premium dark command-center theme." value={dark} onChange={setDark}/></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">PURCHASE SAFETY</span><h3>Autonomous buying</h3></div></div><div className="safety-box"><Zap size={18}/><div><b>Auto-checkout is controlled server-side</b><span>Maximum price, seller rating, spending limits, duplicate protection and approval rules are enforced before checkout.</span></div></div><div className="setting-row"><div><b>Emergency stop</b><small>Use the API/settings client to disable purchase authorization globally.</small></div><span className="status green">READY</span></div></div></div></div>}
+function SettingsPage({dark,setDark,aiStatus}:any){return <div className="stack"><PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety first"/><div className="settings-grid"><div className="panel"><div className="panel-head"><div><span className="eyebrow">AI ENGINE</span><h3>Local + API AI</h3></div></div><div className="safety-box"><Bot size={18}/><div><b>{aiStatus?.configured_provider==='ollama'?'Ollama local AI':'Hosted API AI'}</b><span>{aiStatus?.ollama?.available?`Ollama online • ${aiStatus.ollama.model}`:'Ollama not detected'} {aiStatus?.api?.configured?'• API key configured':''}</span></div><span className={`status ${aiStatus?.ollama?.available?'green':'purple'}`}>{aiStatus?.ollama?.available?'LOCAL READY':'CONFIGURE'}</span></div><div className="setting-row"><div><b>Free/local mode</b><small>Run supported open-weight models locally through Ollama with no paid AI API.</small></div><span className="status green">SUPPORTED</span></div><div className="setting-row"><div><b>Hosted API mode</b><small>Use an OpenAI-compatible provider when higher-capability cloud reasoning is preferred.</small></div><span className="status blue">OPTIONAL</span></div><div className="setting-row"><div><b>Built-in browser models</b><small>Free local inference feature unavailable in this build. Use Ollama or API AI instead.</small></div><span className="status purple">NOT AVAILABLE</span></div><div className="setting-row"><div><b>Ollama models</b><small>{(aiStatus?.ollama?.models||[]).length ? (aiStatus.ollama.models as string[]).join(', ') : 'Install any compatible Ollama model locally; ShopAgent discovers installed models automatically.'}</small></div><span className="status green">LOCAL</span></div></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">APPEARANCE</span><h3>Interface</h3></div></div><SettingToggle title="Dark mode" text="Use the premium dark command-center theme." value={dark} onChange={setDark}/></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">PURCHASE SAFETY</span><h3>Autonomous buying</h3></div></div><div className="safety-box"><Zap size={18}/><div><b>Auto-checkout is controlled server-side</b><span>Maximum price, seller rating, spending limits, duplicate protection and approval rules are enforced before checkout.</span></div></div><div className="setting-row"><div><b>Emergency stop</b><small>Use the API/settings client to disable purchase authorization globally.</small></div><span className="status green">READY</span></div></div></div></div>}
 
 function SettingToggle({title,text,value,onChange}:any){return <div className="setting-row"><div><b>{title}</b><small>{text}</small></div><button className={`toggle ${value?'on':''}`} onClick={()=>onChange(!value)}><span/></button></div>}
 function Explain({icon:Icon,title,text}:any){return <div className="explain"><span><Icon size={17}/></span><div><b>{title}</b><p>{text}</p></div></div>}

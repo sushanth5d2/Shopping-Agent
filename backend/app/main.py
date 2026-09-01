@@ -16,6 +16,15 @@ from .checkout import ManualHandoffCheckoutAdapter
 from .notifications import telegram
 app=FastAPI(title='ShopAgent API',version='3.0.0')
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(',') if x.strip()],allow_credentials=True,allow_methods=['GET','POST','PATCH','PUT','DELETE','OPTIONS'],allow_headers=['Authorization','Content-Type','Idempotency-Key'])
+
+@app.get('/')
+def root():
+    return {'status':'ok','service':'ShopAgent API','docs':'/docs'}
+
+@app.get('/health')
+def health_root():
+    return {'status':'ok','service':'ShopAgent API'}
+
 class Register(BaseModel):email:EmailStr;password:str=Field(min_length=10,max_length=128)
 class Login(BaseModel):email:EmailStr;password:str
 class Refresh(BaseModel):refresh_token:str

@@ -1,4 +1,8 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 class Settings(BaseSettings):
     database_url:str='sqlite:///./shopagent.db'
     jwt_secret:str='shopagent-local-development-secret-change-in-production-please-use-a-random-32-byte-secret'
@@ -21,5 +25,11 @@ class Settings(BaseSettings):
     max_comparison_sources:int=8
     allow_demo_seed:bool=False
     playwright_headless:bool=True
-    model_config=SettingsConfigDict(env_prefix='SHOPAGENT_',env_file='.env',extra='ignore')
+    model_config=SettingsConfigDict(
+        env_prefix='SHOPAGENT_',
+        env_file=str(PROJECT_ROOT / '.env'),
+        env_file_encoding='utf-8',
+        extra='ignore',
+    )
+
 settings=Settings()
