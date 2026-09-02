@@ -43,6 +43,38 @@ interface Listing {
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
 
+let refreshMutex: Promise<boolean> | null = null;
+
+async function tryRefreshToken(): Promise<boolean> {
+  if (refreshMutex) return refreshMutex;
+  refreshMutex = (async () => {
+    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('sa_refresh') : null;
+    if (!refreshToken) return false;
+    try {
+      const refreshRes = await fetch(`${API}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+      if (refreshRes.ok) {
+        const tokens = await refreshRes.json();
+        localStorage.setItem('sa_access', tokens.access_token);
+        localStorage.setItem('sa_refresh', tokens.refresh_token);
+        return true;
+      }
+    } catch {}
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('sa_access');
+      localStorage.removeItem('sa_refresh');
+      window.dispatchEvent(new Event('sa-auth-changed'));
+    }
+    return false;
+  })().finally(() => {
+    refreshMutex = null;
+  });
+  return refreshMutex;
+}
+
 async function req(path: string, opt: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('sa_access') : null;
   let r: Response;
@@ -57,28 +89,9 @@ async function req(path: string, opt: RequestInit = {}) {
 
   // Handle 401 Unauthorized (expired token or re-seeded database)
   if (r.status === 401 && !path.startsWith('/api/auth/')) {
-    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('sa_refresh') : null;
-    if (refreshToken) {
-      try {
-        const refreshRes = await fetch(`${API}/api/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken })
-        });
-        if (refreshRes.ok) {
-          const tokens = await refreshRes.json();
-          localStorage.setItem('sa_access', tokens.access_token);
-          localStorage.setItem('sa_refresh', tokens.refresh_token);
-          // Retry request with fresh token
-          return req(path, opt);
-        }
-      } catch {}
-    }
-    // Refresh failed or no refresh token - clear session and trigger login
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('sa_access');
-      localStorage.removeItem('sa_refresh');
-      window.dispatchEvent(new Event('sa-auth-changed'));
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      return req(path, opt);
     }
     throw new Error('Session expired. Please sign in again.');
   }
@@ -189,10 +202,22 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && localStorage.getItem('sa_access')) {
-      setAuthed(true);
-      load();
-    }
+    const initAuth = async () => {
+      if (typeof window !== 'undefined' && localStorage.getItem('sa_access')) {
+        try {
+          await req('/api/me');
+          setAuthed(true);
+          load();
+        } catch {
+          localStorage.removeItem('sa_access');
+          localStorage.removeItem('sa_refresh');
+          setAuthed(false);
+        }
+      } else {
+        setAuthed(false);
+      }
+    };
+    initAuth();
     const handleAuthChange = () => {
       if (!localStorage.getItem('sa_access')) {
         setAuthed(false);
