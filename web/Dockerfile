@@ -1,11 +1,12 @@
 FROM node:20-alpine
 WORKDIR /app
 
-# Cache package manifests
-COPY package.json package-lock.json* ./
-RUN npm install --prefer-offline --no-audit
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
 
-# Copy source and build
+COPY package.json package-lock.json* ./
+RUN npm ci --prefer-offline --no-audit || npm install --prefer-offline --no-audit
+
 COPY . .
 RUN npm run build
 
