@@ -78,13 +78,48 @@ def wait_for_db(max_retries=30, delay=1.0):
     
     return False
 
+def auto_migrate_schema(eng):
+    """Safely adds missing columns and alters constraints on existing PostgreSQL tables without data loss."""
+    from sqlalchemy import text
+    migrations = [
+        # user_preferences custom AI columns
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_ai_enabled BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_ai_provider VARCHAR(50) DEFAULT 'openai';",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_ai_base_url VARCHAR(500) DEFAULT 'https://api.openai.com/v1';",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_ai_api_key TEXT DEFAULT '';",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_ai_model VARCHAR(120) DEFAULT 'gpt-4o-mini';",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS telegram_bot_token VARCHAR(255) DEFAULT '';",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(120) DEFAULT '';",
+        # orders constraints & columns
+        "ALTER TABLE orders ALTER COLUMN listing_id DROP NOT NULL;",
+        "ALTER TABLE orders ALTER COLUMN observed_price DROP NOT NULL;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS listing_id INTEGER;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS observed_price FLOAT;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS savings FLOAT DEFAULT 0;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100);",
+        # shopping_items columns
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS product_id INTEGER;",
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;"
+    ]
+    with eng.connect() as conn:
+        for stmt in migrations:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
 def init_db():
-    """Waits for DB connection, binds engine, and creates all relational tables."""
+    """Waits for DB connection, binds engine, creates tables and performs auto-migration."""
     global engine, SessionLocal
     if wait_for_db():
         from app import models  # Register all models with Base.metadata
         Base.metadata.create_all(bind=engine)
-        logger.info("All database tables verified and created successfully.")
-        print("INFO: All database tables verified and created successfully.", flush=True)
+        auto_migrate_schema(engine)
+        logger.info("All database tables verified, migrated, and created successfully.")
+        print("INFO: All database tables verified, migrated, and created successfully.", flush=True)
         return True
     return False

@@ -495,25 +495,29 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it: raise HTTPException(404,'Item not found')
  if not it.product_id:
-  first_prod = db.query(Product).first()
-  if first_prod:
-   it.product_id = first_prod.id
-   db.commit()
- if not it.product_id:
-  raise HTTPException(404,'No linked product available for checkout')
+  prod = find_or_create_product_for_name(db, it.name)
+  it.product_id = prod.id
+  db.commit()
  if not idempotency_key: idempotency_key=uuid.uuid4().hex
  existing=db.query(Order).filter_by(idempotency_key=idempotency_key).first()
  if existing: return {'status':existing.status,'order_number':existing.order_number,'idempotent_replay':True}
- c=product_summary(db,it.product_id); best=c['best']
+ c=product_summary(db,it.product_id); best=c.get('best') or {}
  order_num = f"ORD-{uuid.uuid4().hex[:8].upper()}"
- total_price = best.get('true_total', best.get('price', 999.0))
+ total_price = float(best.get('true_total', best.get('price', it.target_price or 999.0)))
+ observed_price = float(best.get('price', total_price))
  savings_val = round(max(0.0, float((it.max_price or (total_price * 1.15)) - total_price)), 2)
+ listing_id = best.get('id') or best.get('listing_id')
+ if not isinstance(listing_id, int):
+  first_listing = db.query(StoreListing).filter_by(product_id=it.product_id).first()
+  listing_id = first_listing.id if first_listing else None
  ord_rec = Order(
   user_id=u.id,
   item_id=it.id,
+  listing_id=listing_id,
   product_name=it.name,
-  store=best.get('store', 'Verified Partner'),
+  store=best.get('store', 'Amazon India'),
   price=total_price,
+  observed_price=observed_price,
   savings=savings_val,
   status='CONFIRMED',
   order_number=order_num,
@@ -521,6 +525,7 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  )
  db.add(ord_rec)
  it.status = 'COMPLETED'
+ it.completed_at = now()
  db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Order {order_num} placed for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). Verified savings: ₹{savings_val:,.2f}."))
  db.commit()
  return {
