@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.gitignore
+*.db
+*.sqlite
+*.log
+__pycache__
+.pytest_cache
+dist
+.env
+.env.local
