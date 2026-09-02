@@ -1147,10 +1147,33 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
   const [testingAi, setTestingAi] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [showKey, setShowKey] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<any>(aiStatus || null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
 
   useEffect(() => {
     if (preferences) setPrefs(preferences);
   }, [preferences]);
+
+  useEffect(() => {
+    if (aiStatus) setLiveStatus(aiStatus);
+  }, [aiStatus]);
+
+  const refreshAiStatus = async () => {
+    setCheckingStatus(true);
+    try {
+      const s = await req('/api/ai/status');
+      setLiveStatus(s);
+    } catch {}
+    finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshAiStatus();
+    const interval = setInterval(refreshAiStatus, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   const presets: Record<string, { base_url: string; model: string; label: string }> = {
     openai: { label: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
@@ -1191,6 +1214,7 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
         })
       });
       setTestResult(res);
+      refreshAiStatus();
     } catch (e: any) {
       setTestResult({ ok: false, error: e.message || 'Connection test failed' });
     } finally {
@@ -1285,22 +1309,39 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
             <button className="secondary" type="button" onClick={runTestAi} disabled={testingAi}>
               {testingAi ? 'Testing connection…' : <>⚡ Test API Connection</>}
             </button>
-            <button className="primary" type="button" onClick={() => savePreferences(prefs)} disabled={busy}>
+            <button className="primary" type="button" onClick={async () => { await savePreferences(prefs); refreshAiStatus(); }} disabled={busy}>
               {busy ? 'Saving…' : 'Save & Activate Custom AI'}
             </button>
           </div>
         </div>
 
-        {/* Built-in Status */}
+        {/* Live Engine Status with Real-Time Indicator */}
         <div className="panel">
-          <div className="panel-head"><div><span className="eyebrow">SYSTEM ENGINES</span><h3>Built-In AI Status</h3></div></div>
-          <div className="safety-box">
-            <Bot size={18} />
+          <div className="panel-head">
             <div>
-              <b>{prefs.custom_ai_enabled && prefs.custom_ai_api_key ? `Custom AI Active (${prefs.custom_ai_model})` : 'Deterministic & Local AI'}</b>
-              <span>{prefs.custom_ai_enabled && prefs.custom_ai_api_key ? `Routing through ${prefs.custom_ai_base_url}` : 'Running built-in high-precision deterministic parser'}</span>
+              <span className="eyebrow">LIVE TELEMETRY</span>
+              <h3>Active AI Engine Status</h3>
             </div>
-            <span className="status green">READY</span>
+            <button
+              type="button"
+              className="round"
+              title="Check live status"
+              onClick={refreshAiStatus}
+              disabled={checkingStatus}
+              style={{ padding: '4px 8px', width: 'auto', height: 'auto', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              {checkingStatus ? 'Checking…' : '🔄 Refresh'}
+            </button>
+          </div>
+          <div className="safety-box" style={{ borderColor: liveStatus?.is_online === false ? '#ef4444' : undefined }}>
+            <Bot size={20} color={liveStatus?.is_online === false ? '#ef4444' : '#22c55e'} />
+            <div>
+              <b>{liveStatus?.active_name || 'Deterministic & Local AI'}</b>
+              <span>{liveStatus?.details || 'Running built-in high-precision deterministic parser'}</span>
+            </div>
+            <span className={`status ${liveStatus?.is_online === false ? 'orange' : 'green'}`} style={liveStatus?.is_online === false ? { background: '#7f1d1d', color: '#fca5a5' } : {}}>
+              {liveStatus?.badge || (liveStatus?.is_online === false ? 'OFFLINE' : 'ONLINE')}
+            </span>
           </div>
         </div>
 

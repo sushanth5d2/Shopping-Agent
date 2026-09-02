@@ -270,12 +270,14 @@ def delete_item(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  db.delete(it);db.commit();return {'ok':True}
 
 @app.get('/api/ai/status')
-def ai_status(u=Depends(current_user)):
- return ai_provider_status()
+def ai_status(u=Depends(current_user), db:Session=Depends(get_db)):
+ pref = db.query(UserPreference).filter_by(user_id=u.id).first()
+ return ai_provider_status(pref=pref)
 
 @app.get('/api/ai/models')
-def ai_models(u=Depends(current_user)):
- status=ai_provider_status()
+def ai_models(u=Depends(current_user), db:Session=Depends(get_db)):
+ pref = db.query(UserPreference).filter_by(user_id=u.id).first()
+ status = ai_provider_status(pref=pref)
  return {'embedded_local':status['embedded_local']['models'],'ollama_installed':status['ollama'].get('models',[]),'cloud_api':status['api']}
 
 @app.post('/api/ai/test')

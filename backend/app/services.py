@@ -469,24 +469,75 @@ def get_ai_provider(name=None, pref=None):
     if provider in {'ollama', 'local', 'local-ollama'}: return OllamaProvider()
     return OllamaProvider()
 
-def ai_provider_status():
+def ai_provider_status(pref=None):
     browser_models = [
         {'id': 'onnx-community/Qwen3-0.6B-ONNX', 'name': 'Qwen3 0.6B', 'runtime': 'Transformers.js/ONNX', 'api_key_required': False, 'device': 'WebGPU/WASM'},
         {'id': 'onnx-community/granite-4.0-350m-ONNX-web', 'name': 'Granite 4.0 350M', 'runtime': 'Transformers.js/ONNX', 'api_key_required': False, 'device': 'WebGPU/WASM'},
         {'id': 'Xenova/LaMini-Flan-T5-77M', 'name': 'LaMini-Flan-T5 77M', 'runtime': 'Transformers.js/ONNX', 'api_key_required': False, 'device': 'WASM'},
     ]
+    
+    # 1. Default deterministic built-in baseline
+    active_name = 'Deterministic & Local AI'
+    status_label = 'ONLINE'
+    badge_label = 'READY'
+    details_text = 'Running built-in high-precision deterministic parser'
+    is_online = True
+    latency_val = 1
+
+    # 2. Check if user configured custom AI
+    if pref and getattr(pref, 'custom_ai_enabled', False) and getattr(pref, 'custom_ai_api_key', ''):
+        custom_test = test_ai_connection(
+            base_url=getattr(pref, 'custom_ai_base_url', 'https://api.openai.com/v1'),
+            api_key=getattr(pref, 'custom_ai_api_key', ''),
+            model=getattr(pref, 'custom_ai_model', 'gpt-4o-mini')
+        )
+        provider_name = (getattr(pref, 'custom_ai_provider', 'openai') or 'Custom').upper()
+        active_name = f"Custom AI ({provider_name} - {getattr(pref, 'custom_ai_model', 'model')})"
+        latency_val = custom_test.get('latency_ms', 0)
+        if custom_test.get('ok'):
+            status_label = 'ONLINE'
+            badge_label = f"WORKING ({latency_val}ms)"
+            details_text = f"Connected to {getattr(pref, 'custom_ai_base_url', '')} in {latency_val}ms"
+            is_online = True
+        else:
+            status_label = 'OFFLINE'
+            badge_label = 'OFFLINE'
+            details_text = f"Custom AI offline: {custom_test.get('error', 'Unreachable')}. Fallen back to built-in parser."
+            is_online = False
+    elif settings.ai_provider == 'ollama':
+        try:
+            r = httpx.get(settings.ollama_base_url.rstrip('/') + '/api/tags', timeout=1.5)
+            if r.is_success:
+                active_name = f"Ollama Local ({settings.ollama_model})"
+                status_label = 'ONLINE'
+                badge_label = 'WORKING'
+                details_text = f"Connected to local Ollama daemon at {settings.ollama_base_url}"
+                is_online = True
+            else:
+                active_name = f"Ollama Local ({settings.ollama_model})"
+                status_label = 'OFFLINE'
+                badge_label = 'OFFLINE'
+                details_text = f"Ollama daemon not responding at {settings.ollama_base_url}. Using built-in parser."
+                is_online = False
+        except Exception:
+            active_name = f"Ollama Local ({settings.ollama_model})"
+            status_label = 'OFFLINE'
+            badge_label = 'OFFLINE'
+            details_text = f"Ollama daemon unreachable at {settings.ollama_base_url}. Using built-in parser."
+            is_online = False
+
     result = {
         'configured_provider': settings.ai_provider,
+        'active_name': active_name,
+        'status': status_label,
+        'badge': badge_label,
+        'details': details_text,
+        'is_online': is_online,
+        'latency_ms': latency_val,
         'embedded_local': {'available': True, 'provider': 'transformers.js', 'api_key_required': False, 'inference': 'browser-local', 'models': browser_models},
         'ollama': {'base_url': settings.ollama_base_url, 'model': settings.ollama_model, 'available': False, 'models': []},
         'api': {'base_url': settings.ai_api_base_url, 'model': settings.ai_api_model, 'configured': bool(settings.ai_api_key)}
     }
-    try:
-        r = httpx.get(settings.ollama_base_url.rstrip('/') + '/api/tags', timeout=1.5)
-        result['ollama']['available'] = r.is_success
-        if r.is_success: result['ollama']['models'] = [m.get('name') for m in r.json().get('models', [])]
-    except Exception:
-        pass
     return result
 
 @dataclass
