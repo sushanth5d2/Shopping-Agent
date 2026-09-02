@@ -54,6 +54,35 @@ async function req(path: string, opt: RequestInit = {}) {
   } catch {
     throw new Error('Unable to connect to server. Please check if the backend is running.');
   }
+
+  // Handle 401 Unauthorized (expired token or re-seeded database)
+  if (r.status === 401 && !path.startsWith('/api/auth/')) {
+    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('sa_refresh') : null;
+    if (refreshToken) {
+      try {
+        const refreshRes = await fetch(`${API}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken })
+        });
+        if (refreshRes.ok) {
+          const tokens = await refreshRes.json();
+          localStorage.setItem('sa_access', tokens.access_token);
+          localStorage.setItem('sa_refresh', tokens.refresh_token);
+          // Retry request with fresh token
+          return req(path, opt);
+        }
+      } catch {}
+    }
+    // Refresh failed or no refresh token - clear session and trigger login
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('sa_access');
+      localStorage.removeItem('sa_refresh');
+      window.dispatchEvent(new Event('sa-auth-changed'));
+    }
+    throw new Error('Session expired. Please sign in again.');
+  }
+
   if (!r.ok) {
     let errMsg = 'Request failed';
     try {
@@ -151,7 +180,7 @@ export default function App() {
         if (dLab) setDecisionData(dLab);
       }
     } catch (err: any) {
-      if (!localStorage.getItem('sa_access')) {
+      if (!localStorage.getItem('sa_access') || err.message?.includes('Session expired')) {
         setAuthed(false);
       } else {
         setToast(err.message || 'Failed to refresh data');
@@ -164,6 +193,13 @@ export default function App() {
       setAuthed(true);
       load();
     }
+    const handleAuthChange = () => {
+      if (!localStorage.getItem('sa_access')) {
+        setAuthed(false);
+      }
+    };
+    window.addEventListener('sa-auth-changed', handleAuthChange);
+    return () => window.removeEventListener('sa-auth-changed', handleAuthChange);
   }, []);
 
   useEffect(() => {
@@ -475,6 +511,9 @@ export default function App() {
                 <div><b>Account</b><small>Verified Pro</small></div>
                 <ChevronDown size={14} />
               </button>
+              <button className="round" title="Sign out" onClick={signout} style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.1)' }}>
+                <LogOut size={16} />
+              </button>
             </div>
           </div>
         </header>
@@ -491,7 +530,7 @@ export default function App() {
           {tab === 'Savings' && <Savings data={data} orders={orders} />}
           {tab === 'Agent Activity' && <ActivityPage rows={activity} />}
           {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} />}
-          {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} preferences={preferences} savePreferences={savePreferences} busy={busy} />}
+          {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} preferences={preferences} savePreferences={savePreferences} busy={busy} signout={signout} />}
         </div>
       </main>
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
@@ -1103,7 +1142,7 @@ function Compare({ data, back, openDecisionLab }: any) {
   );
 }
 
-function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, busy }: any) {
+function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, busy, signout }: any) {
   const [prefs, setPrefs] = useState(preferences || {});
   const [testingAi, setTestingAi] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
@@ -1302,6 +1341,28 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
             </div>
             <button className="secondary" onClick={() => savePreferences(prefs)} disabled={busy}>{busy ? 'Saving…' : 'Save Telegram Config'}</button>
           </div>
+        </div>
+
+        {/* Account Session & Sign Out */}
+        <div className="panel" style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}>
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow" style={{ color: '#ef4444' }}>ACCOUNT SESSION</span>
+              <h3>Sign Out</h3>
+            </div>
+            <LogOut size={18} color="#ef4444" />
+          </div>
+          <p style={{ fontSize: 13, color: '#cbd5e1', margin: '4px 0 14px' }}>
+            End your active shopping session and return to the login screen.
+          </p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={signout}
+            style={{ borderColor: '#ef4444', color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <LogOut size={16} /> Sign out from ShopAgent
+          </button>
         </div>
       </div>
     </div>
