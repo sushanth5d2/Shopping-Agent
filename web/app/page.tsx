@@ -568,20 +568,50 @@ function Auth({ mode, setMode, email, setEmail, password, setPassword, auth, bus
     <div className="auth-page">
       <div className="auth-card">
         <div className="brand auth-brand">
-          <span className="brand-mark"><Sparkles size={18} /></span>
+          <span className="brand-mark"><Sparkles size={20} /></span>
           <div><b>ShopAgent</b><small>Personal AI Shopping Assistant</small></div>
         </div>
         <span className="auth-eyebrow">PRIVATE SHOPPING COMMAND CENTER</span>
-        <h2>{mode === 'login' ? 'Sign in to ShopAgent.' : 'Create your account.'}</h2>
+        <h1>{mode === 'login' ? 'Sign in to ShopAgent.' : 'Create your account.'}</h1>
         <p>One unified place to search, verify, compare, monitor, and control your shopping without markups or fake deals.</p>
-        <div className="auth-inputs">
-          <div><label>Email</label><input type="email" placeholder="you@domain.com" value={email} onChange={e => setEmail(e.target.value)} /></div>
-          <div><label>Password</label><input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && auth()} /></div>
-          <button className="primary auth-submit" onClick={auth} disabled={busy}>{busy ? 'Processing…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
-          <div className="auth-switch">
-            {mode === 'login' ? <>New to ShopAgent? <button onClick={() => setMode('register')}>Create account</button></> : <>Already have an account? <button onClick={() => setMode('login')}>Sign in</button></>}
+        
+        <form onSubmit={e => { e.preventDefault(); auth(); }} className="auth-inputs">
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              placeholder="you@domain.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+          </label>
+          <button
+            type="submit"
+            className="primary auth-submit"
+            disabled={busy}
+            style={{ width: '100%', marginTop: 12, height: 46, fontSize: 14, fontWeight: 700 }}
+          >
+            {busy ? 'Processing…' : mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
+          <div className="auth-switch" style={{ marginTop: 18, textAlign: 'center', fontSize: 13, color: '#94a3b8' }}>
+            {mode === 'login' ? (
+              <>New to ShopAgent? <button type="button" className="switch" style={{ width: 'auto', display: 'inline', margin: 0, padding: 0 }} onClick={() => setMode('register')}>Create account</button></>
+            ) : (
+              <>Already have an account? <button type="button" className="switch" style={{ width: 'auto', display: 'inline', margin: 0, padding: 0 }} onClick={() => setMode('login')}>Sign in</button></>
+            )}
           </div>
-        </div>
+        </form>
         {toast && <div className="auth-error">{toast}</div>}
       </div>
     </div>
