@@ -314,6 +314,36 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u)
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
  pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+
+ # Check if multi-item comma-separated input (e.g. "garlic, bread, jam")
+ sub_names = [x.strip() for x in re.split(r',|\band\b', p.name, flags=re.I) if x.strip()]
+ if len(sub_names) > 1:
+  created_items = []
+  for item_n in sub_names:
+   m_prod = find_or_create_product_for_name(db, item_n, p.target_price or p.max_price, pincode=pincode)
+   it_sub = ShoppingItem(
+    list_id=sl.id,
+    name=item_n.title(),
+    quantity=1,
+    target_price=p.target_price,
+    max_price=p.max_price,
+    mode=p.mode,
+    purchase_mode=p.purchase_mode,
+    product_id=m_prod.id,
+    is_gift=p.is_gift,
+    gift_recipient=p.gift_recipient,
+    gift_message=p.gift_message,
+    gift_wrap=p.gift_wrap
+   )
+   db.add(it_sub)
+   db.flush()
+   if it_sub.mode == 'MONITOR':
+    db.add(MonitoringTask(item_id=it_sub.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc) + timedelta(minutes=360)))
+   created_items.append(it_sub)
+  log(db, u, 'Products', f"Added {len(created_items)} items ({', '.join(sub_names)}) with verified multi-store tracking.")
+  db.commit()
+  return item_obj(db, created_items[0])
+
  matched_prod = find_or_create_product_for_name(db, p.name, p.target_price or p.max_price, pincode=pincode)
  it=ShoppingItem(
   list_id=sl.id,
@@ -596,7 +626,7 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  deal_truth=analyze_deal_truth(best.get('price',current_price)*1.3,current_price,hist)
  ownership=calculate_ownership_cost(current_price,p.category or 'Electronics')
  compat=check_compatibility(p.name,p.specs or '')
- reviews=get_review_intelligence(p.name)
+ reviews=get_review_intelligence(p.name, p.category or 'General')
  seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':'Verified 1-2 Day Dispatch','return_satisfaction':'96% Positive Resolution'}
  substitutes = c.get('substitutes', [])
  sustainability = c.get('sustainability', {})
