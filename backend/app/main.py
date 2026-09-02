@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime,timedelta,timezone
 import uuid,hashlib,re
 from urllib.parse import urlparse
-from fastapi import FastAPI,Depends,HTTPException,Header
+from fastapi import FastAPI,Depends,HTTPException,Header,Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel,Field,EmailStr
 from sqlalchemy.orm import Session
@@ -40,6 +40,17 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc) or "Internal server error occurred"}
+    )
 
 @app.get('/')
 def root():
