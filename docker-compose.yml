@@ -10,6 +10,7 @@ services:
       POSTGRES_DB: shopagent
       POSTGRES_USER: shopagent
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - shopagent_pg:/var/lib/postgresql/data
     networks:

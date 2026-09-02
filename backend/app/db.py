@@ -13,8 +13,14 @@ def get_candidate_urls():
         urls.append(u)
     
     base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
-    for host in ['db', 'shopagent-db', 'localhost', '127.0.0.1', 'postgres']:
+    hosts = ['db', 'shopagent-db', 'localhost', '127.0.0.1', 'postgres']
+    
+    # Try multiple common auth permutations for Docker and local dev
+    for host in hosts:
         urls.append(f"postgresql+psycopg://shopagent:{base_pass}@{host}:5432/shopagent")
+        urls.append(f"postgresql+psycopg://shopagent@{host}:5432/shopagent")
+        urls.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/shopagent")
+        urls.append(f"postgresql+psycopg://postgres@{host}:5432/shopagent")
     
     if settings.database_url:
         urls.append(settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1))
@@ -45,7 +51,7 @@ def get_db():
         db.close()
 
 def wait_for_db(max_retries=30, delay=1.0):
-    """Iterates through candidate hosts and retries until PostgreSQL is connected."""
+    """Iterates through candidate hosts and credentials until PostgreSQL is connected."""
     global engine, SessionLocal
     candidates = get_candidate_urls()
     
