@@ -19,14 +19,15 @@ from .seed import seed_data, seed_user_defaults
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure all tables exist in SQLite/PostgreSQL
-    Base.metadata.create_all(bind=engine)
-    # Seed default stores, products, listings, and price snapshots
-    db = SessionLocal()
-    try:
-        seed_data(db)
-    finally:
-        db.close()
+    from .db import wait_for_db
+    # Wait for PostgreSQL database readiness
+    if wait_for_db():
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        try:
+            seed_data(db)
+        finally:
+            db.close()
     yield
 
 app = FastAPI(title='ShopAgent API', version='3.0.0', lifespan=lifespan)
