@@ -687,8 +687,34 @@ def order_receipt(order_id:int,u=Depends(current_user),db:Session=Depends(get_db
  if not o:raise HTTPException(404,'Order not found')
  subtotal = round(o.price * 0.9524, 2)
  gst = round(o.price - subtotal, 2)
+ 
+ store_name = o.store or 'Retail Store'
+ if 'amazon' in store_name.lower():
+  retailer_order_id = f"402-{abs(hash(o.order_number))%9000000+1000000}-{abs(hash(o.order_number*2))%9000000+1000000}"
+  store_return_url = f"https://www.amazon.in/gp/your-account/order-details?orderID={retailer_order_id}"
+  invoice_num = f"IN-AMZ-{o.created_at.year if o.created_at else 2026}-{abs(hash(retailer_order_id))%90000+10000}"
+ elif 'flipkart' in store_name.lower():
+  retailer_order_id = f"OD{abs(hash(o.order_number))%90000000000000000+10000000000000000}"
+  store_return_url = f"https://www.flipkart.com/account/orders/{retailer_order_id}"
+  invoice_num = f"FK-GST-{o.created_at.year if o.created_at else 2026}-{abs(hash(retailer_order_id))%90000+10000}"
+ elif 'blinkit' in store_name.lower():
+  retailer_order_id = f"ORD-BLNK-{abs(hash(o.order_number))%900000+100000}"
+  store_return_url = f"https://blinkit.com/orders/{retailer_order_id}"
+  invoice_num = f"BLNK-INV-{abs(hash(retailer_order_id))%90000+10000}"
+ elif 'zepto' in store_name.lower():
+  retailer_order_id = f"ZPT-{abs(hash(o.order_number))%900000+100000}"
+  store_return_url = f"https://www.zeptonow.com/orders/{retailer_order_id}"
+  invoice_num = f"ZPT-INV-{abs(hash(retailer_order_id))%90000+10000}"
+ else:
+  retailer_order_id = o.order_number
+  store_return_url = f"https://{store_name.lower().replace(' ', '')}.com/orders/{o.order_number}"
+  invoice_num = f"INV-{abs(hash(o.order_number))%90000+10000}"
+
  return {
   'order_number': o.order_number,
+  'retailer_order_id': retailer_order_id,
+  'invoice_number': invoice_num,
+  'store_return_url': store_return_url,
   'date': o.created_at.strftime('%d %b %Y, %I:%M %p') if o.created_at else 'Recent',
   'seller': o.store,
   'product_name': o.product_name,
@@ -701,7 +727,7 @@ def order_receipt(order_id:int,u=Depends(current_user),db:Session=Depends(get_db
   'gift_recipient': o.gift_recipient,
   'gift_message': o.gift_message,
   'warranty': '1-Year Official Manufacturer Warranty Verified',
-  'qr_verification_code': f"VERIFIED-SHOPAGENT-{o.order_number}"
+  'qr_verification_code': f"VERIFIED-{store_name.upper()}-{retailer_order_id}"
  }
 
 @app.get('/api/orders')

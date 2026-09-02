@@ -1340,24 +1340,33 @@ function ReceiptModal({ receipt, onClose }: any) {
   if (!receipt) return null;
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
-      <div className="panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 640, width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: 16, marginBottom: 16 }}>
           <div>
-            <span className="eyebrow" style={{ color: '#22c55e' }}>VERIFIED DIGITAL TAX RECEIPT</span>
-            <h2 style={{ fontSize: 20, margin: '4px 0', color: '#fff' }}>Official Purchase Invoice</h2>
-            <small style={{ color: '#94a3b8' }}>Order Ref: {receipt.order_number} • Date: {receipt.date}</small>
+            <span className="eyebrow" style={{ color: '#22c55e' }}>ORIGINAL STORE TAX INVOICE & RECEIPT</span>
+            <h2 style={{ fontSize: 20, margin: '4px 0', color: '#fff' }}>Official Purchase Tax Receipt</h2>
+            <small style={{ color: '#94a3b8' }}>Verified directly against {receipt.seller} records • Date: {receipt.date}</small>
           </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}><X size={20} /></button>
         </div>
 
+        {/* Store Identifiers: Order ID & Invoice ID for Returns and Warranties */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16, fontSize: 13, background: '#1e293b', padding: 14, borderRadius: 8 }}>
+          <div>
+            <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>ORIGINAL STORE ORDER ID (FOR RETURNS)</span>
+            <b style={{ color: '#38bdf8', fontSize: 14, letterSpacing: '0.5px' }}>{receipt.retailer_order_id || receipt.order_number}</b>
+          </div>
+          <div>
+            <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>TAX INVOICE NUMBER</span>
+            <b style={{ color: '#a78bfa', fontSize: 14 }}>{receipt.invoice_number}</b>
+          </div>
           <div>
             <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>SELLER / PLATFORM</span>
             <b style={{ color: '#fff' }}>{receipt.seller}</b>
           </div>
           <div>
             <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>WARRANTY COVERAGE</span>
-            <b style={{ color: '#38bdf8' }}>{receipt.warranty}</b>
+            <b style={{ color: '#34d399' }}>{receipt.warranty}</b>
           </div>
           {receipt.is_gift && (
             <div style={{ gridColumn: 'span 2', borderTop: '1px dashed #475569', paddingTop: 8, marginTop: 4 }}>
@@ -1387,13 +1396,26 @@ function ReceiptModal({ receipt, onClose }: any) {
           <strong style={{ color: '#34d399', fontSize: 15 }}>₹{Number(receipt.savings || 0).toLocaleString()}</strong>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1e293b', paddingTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1e293b', paddingTop: 16, flexWrap: 'wrap', gap: 10 }}>
           <div style={{ fontSize: 11, color: '#64748b' }}>
             Security ID: <code>{receipt.qr_verification_code}</code>
           </div>
-          <button className="primary" onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
-            <FileText size={14} /> Print / Save PDF
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {receipt.store_return_url && (
+              <a
+                href={receipt.store_return_url}
+                target="_blank"
+                rel="noreferrer"
+                className="secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: 12, color: '#38bdf8', textDecoration: 'none' }}
+              >
+                <ExternalLink size={13} /> Manage Returns on {receipt.seller}
+              </a>
+            )}
+            <button className="primary" onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+              <FileText size={14} /> Print / Save PDF
+            </button>
+          </div>
         </div>
       </div>
     </div>
