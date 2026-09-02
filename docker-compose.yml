@@ -25,7 +25,7 @@ services:
   backend:
     build:
       context: ./backend
-    image: shopagent-backend:latest
+      dockerfile: Dockerfile
     environment:
       SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
       SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
@@ -50,10 +50,12 @@ services:
     restart: unless-stopped
 
   # ==========================================================
-  # Server-Side Monitoring Worker (Reuses backend image)
+  # Server-Side Monitoring Worker
   # ==========================================================
   monitoring-worker:
-    image: shopagent-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     command: ["python", "-m", "app.monitor_worker"]
     environment:
       SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
@@ -74,6 +76,7 @@ services:
   web:
     build:
       context: ./web
+      dockerfile: Dockerfile
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
