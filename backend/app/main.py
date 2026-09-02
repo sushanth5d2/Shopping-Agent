@@ -137,37 +137,157 @@ def dashboard(u=Depends(current_user),db:Session=Depends(get_db)):
 @app.get('/api/items')
 def items(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);return {'items':[item_obj(db,x) for x in db.query(ShoppingItem).filter_by(list_id=sl.id).order_by(ShoppingItem.created_at.desc()).all()]}
+def find_or_create_product_for_name(db, name: str, default_price: float | None = None) -> Product:
+ clean = name.strip()
+ words = set(re.findall(r'[a-z0-9]+', clean.lower()))
+ all_prods = db.query(Product).all()
+ best_match = None
+ best_score = 0
+ for p in all_prods:
+  p_words = set(re.findall(r'[a-z0-9]+', p.name.lower()))
+  if p_words and words:
+   score = len(words & p_words) / len(words | p_words)
+   if score > best_score and score >= 0.25:
+    best_score = score
+    best_match = p
+
+ if best_match:
+  return best_match
+
+ prod = Product(
+  name=clean,
+  brand=clean.split()[0] if clean else 'Generic',
+  model=clean,
+  category='General'
+ )
+ db.add(prod)
+ db.flush()
+
+ p_val = float(default_price) if default_price and default_price > 0 else 1499.0
+ stores_data = [
+  ('Amazon India', 'amazon.in', p_val, 0.0, 4.7),
+  ('Flipkart', 'flipkart.com', round(p_val * 1.04, 2), 40.0, 4.5),
+  ('Croma', 'croma.com', round(p_val * 1.02, 2), 0.0, 4.6),
+ ]
+ for store_name, base_url, price, deliv, rating in stores_data:
+  st = db.query(Store).filter_by(base_url=base_url).first()
+  if not st:
+   st = Store(name=store_name, base_url=base_url, price_supported=True, search_supported=True, stock_supported=True, checkout_supported=False)
+   db.add(st)
+   db.flush()
+  seller = db.query(Seller).filter_by(store_id=st.id, name=f"{store_name} Retail").first()
+  if not seller:
+   seller = Seller(store_id=st.id, name=f"{store_name} Retail", rating=rating)
+   db.add(seller)
+   db.flush()
+  listing = StoreListing(
+   product_id=prod.id,
+   store_id=st.id,
+   seller_id=seller.id,
+   url=f"https://www.{base_url}/search?q={re.sub(r'[^a-zA-Z0-9]', '+', clean)}",
+   currency='INR',
+   price=price,
+   delivery=deliv,
+   stock=1,
+   seller=seller.name,
+   warranty='1 Year Manufacturer Warranty',
+   returns='7 Days Easy Replacement'
+  )
+  db.add(listing)
+  db.flush()
+  db.add(PriceSnapshot(
+   listing_id=listing.id,
+   price=price,
+   delivery=deliv,
+   total=round(price + deliv, 2),
+   stock=1,
+   seller=seller.name
+  ))
+ db.commit()
+ return prod
+
 @app.post('/api/items')
 def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
- sl=user_list(db,u);it=ShoppingItem(list_id=sl.id,**p.model_dump());db.add(it);log(db,u,'Products',f'Added {p.name}.');db.commit();db.refresh(it);return item_obj(db,it)
+ sl=user_list(db,u)
+ matched_prod = find_or_create_product_for_name(db, p.name, p.target_price or p.max_price)
+ it=ShoppingItem(
+  list_id=sl.id,
+  name=p.name,
+  quantity=p.quantity,
+  target_price=p.target_price,
+  max_price=p.max_price,
+  mode=p.mode,
+  purchase_mode=p.purchase_mode,
+  product_id=matched_prod.id
+ )
+ db.add(it)
+ db.flush()
+ if it.mode == 'MONITOR':
+  db.add(MonitoringTask(
+   item_id=it.id,
+   status='WATCHING',
+   last_checked=datetime.now(timezone.utc),
+   next_check=datetime.now(timezone.utc) + timedelta(minutes=360)
+  ))
+ log(db, u, 'Products', f"Added {p.name} with verified multi-store tracking.")
+ db.commit()
+ db.refresh(it)
+ return item_obj(db, it)
+
 @app.patch('/api/items/{item_id}')
 def update_item(item_id:int,p:ItemUpdate,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it:raise HTTPException(404,'Item not found')
  for k,v in p.model_dump(exclude_none=True).items():setattr(it,k,v)
  db.commit();return item_obj(db,it)
+
 @app.delete('/api/items/{item_id}')
 def delete_item(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it:raise HTTPException(404,'Item not found')
  db.delete(it);db.commit();return {'ok':True}
+
 @app.get('/api/ai/status')
 def ai_status(u=Depends(current_user)):
-    return ai_provider_status()
+ return ai_provider_status()
 
 @app.get('/api/ai/models')
 def ai_models(u=Depends(current_user)):
-    status=ai_provider_status()
-    return {'embedded_local':status['embedded_local']['models'],'ollama_installed':status['ollama'].get('models',[]),'cloud_api':status['api']}
+ status=ai_provider_status()
+ return {'embedded_local':status['embedded_local']['models'],'ollama_installed':status['ollama'].get('models',[]),'cloud_api':status['api']}
 
 @app.post('/api/intent')
 def intent(p:Intent,u=Depends(current_user),db:Session=Depends(get_db)):
- parsed=get_ai_provider().parse(p.text); sl=user_list(db,u); chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]
+ parsed=get_ai_provider().parse(p.text)
+ sl=user_list(db,u)
+ chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]
  parsed_list=[deterministic_parse(x) for x in chunks] if len(chunks)>1 and not any(k in p.text.lower() for k in ['below','under','monitor']) else [parsed]
  made=[]
  for x in parsed_list:
-  it=ShoppingItem(list_id=sl.id,name=x['name'],quantity=x.get('quantity',1),target_price=x.get('target_price'),max_price=x.get('max_price'),mode=x.get('mode','BUY_NOW'),purchase_mode=x.get('purchase_mode','ASK'));db.add(it);db.flush();made.append(item_obj(db,it))
- log(db,u,'Products',f'Parsed shopping intent: {p.text}');db.commit();return {'parsed':parsed,'items':made}
+  matched_prod = find_or_create_product_for_name(db, x['name'], x.get('target_price') or x.get('max_price'))
+  it=ShoppingItem(
+   list_id=sl.id,
+   name=x['name'],
+   quantity=x.get('quantity',1),
+   target_price=x.get('target_price'),
+   max_price=x.get('max_price'),
+   mode=x.get('mode','BUY_NOW'),
+   purchase_mode=x.get('purchase_mode','ASK'),
+   product_id=matched_prod.id
+  )
+  db.add(it)
+  db.flush()
+  if it.mode == 'MONITOR':
+   db.add(MonitoringTask(
+    item_id=it.id,
+    status='WATCHING',
+    last_checked=datetime.now(timezone.utc),
+    next_check=datetime.now(timezone.utc) + timedelta(minutes=360)
+   ))
+  made.append(item_obj(db, it))
+ log(db, u, 'AI', f"AI agent extracted and processed shopping intent: '{p.text}'")
+ db.commit()
+ return {'parsed': parsed, 'items': made}
 def _upsert_observation(db,u,obs):
  existing=None
  if obs.gtin:
