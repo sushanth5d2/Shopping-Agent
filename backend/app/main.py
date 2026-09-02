@@ -29,8 +29,16 @@ async def lifespan(app: FastAPI):
         db.close()
     yield
 
-app=FastAPI(title='ShopAgent API',version='3.0.0',lifespan=lifespan)
-app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(',') if x.strip()],allow_credentials=True,allow_methods=['GET','POST','PATCH','PUT','DELETE','OPTIONS'],allow_headers=['Authorization','Content-Type','Idempotency-Key'])
+app = FastAPI(title='ShopAgent API', version='3.0.0', lifespan=lifespan)
+cors_list = [x.strip() for x in settings.cors_origins.split(',') if x.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'] if '*' in cors_list else cors_list,
+    allow_origin_regex=r'https?://.*' if '*' in cors_list else None,
+    allow_credentials=True if '*' not in cors_list else False,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 @app.get('/')
 def root():

@@ -9,7 +9,7 @@ import {
   HelpCircle, ThumbsUp, AlertTriangle, PlayCircle, Scale
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 type Item = {
   id: number; name: string; quantity: number; target_price: number | null; max_price: number | null;
