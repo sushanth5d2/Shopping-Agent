@@ -5,18 +5,25 @@ services:
   # ==========================================================
   db:
     image: postgres:16-alpine
+    container_name: shopagent-db
     environment:
       POSTGRES_DB: shopagent
       POSTGRES_USER: shopagent
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}
     volumes:
       - shopagent_pg:/var/lib/postgresql/data
+    networks:
+      shopagent_net:
+        aliases:
+          - db
+          - shopagent-db
+          - postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shopagent -d shopagent"]
-      interval: 3s
+      interval: 2s
       timeout: 3s
-      retries: 10
-      start_period: 5s
+      retries: 20
+      start_period: 2s
     restart: unless-stopped
 
   # ==========================================================
@@ -27,10 +34,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     image: shopagent-backend:latest
+    container_name: shopagent-backend
     environment:
       SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
       SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
-      SHOPAGENT_CORS_ORIGINS: ${SHOPAGENT_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      SHOPAGENT_CORS_ORIGINS: "*"
       SHOPAGENT_AI_API_BASE_URL: ${SHOPAGENT_AI_API_BASE_URL:-}
       SHOPAGENT_AI_API_KEY: ${SHOPAGENT_AI_API_KEY:-}
       SHOPAGENT_AI_API_MODEL: ${SHOPAGENT_AI_API_MODEL:-}
@@ -45,6 +53,8 @@ services:
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
     ports:
       - "${SHOPAGENT_API_PORT:-8000}:8000"
+    networks:
+      - shopagent_net
     depends_on:
       db:
         condition: service_healthy
@@ -58,6 +68,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     image: shopagent-backend:latest
+    container_name: shopagent-worker
     command: ["python", "-m", "app.monitor_worker"]
     environment:
       SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
@@ -65,6 +76,8 @@ services:
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
       SHOPAGENT_PLAYWRIGHT_HEADLESS: ${SHOPAGENT_PLAYWRIGHT_HEADLESS:-true}
+    networks:
+      - shopagent_net
     depends_on:
       db:
         condition: service_healthy
@@ -80,14 +93,22 @@ services:
       context: ./web
       dockerfile: Dockerfile
     image: shopagent-web:latest
+    container_name: shopagent-web
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      BACKEND_INTERNAL_URL: http://backend:8000
     ports:
       - "${SHOPAGENT_WEB_PORT:-3000}:3000"
+    networks:
+      - shopagent_net
     depends_on:
       backend:
         condition: service_started
     restart: unless-stopped
+
+networks:
+  shopagent_net:
+    driver: bridge
 
 volumes:
   shopagent_pg:
