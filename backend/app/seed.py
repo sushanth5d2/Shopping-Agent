@@ -264,31 +264,5 @@ def seed_data(db: Session) -> None:
 
 
 def seed_user_defaults(db: Session, user_id: int, list_id: int) -> None:
-    """Populate default starter shopping items for a newly registered user so their dashboard has rich interactive data."""
-    # Check if user already has items
-    if db.query(ShoppingItem).filter_by(list_id=list_id).count() > 0:
-        return
-
-    # Find seeded products
-    sony = db.query(Product).filter(Product.name.like("%Sony WH-1000XM6%")).first()
-    rice = db.query(Product).filter(Product.name.like("%Basmati Rice%")).first()
-    cable = db.query(Product).filter(Product.name.like("%Anker%")).first()
-    logi = db.query(Product).filter(Product.name.like("%MX Master%")).first()
-
-    items_to_add = [
-        {"name": "Sony WH-1000XM6 Wireless Noise-Cancelling Headphones", "quantity": 1, "target_price": 24000.0, "max_price": 27000.0, "mode": "MONITOR", "purchase_mode": "ASK", "product_id": sony.id if sony else None},
-        {"name": "Daawat Ultima Extra Long Basmati Rice 5kg", "quantity": 1, "target_price": 900.0, "max_price": 1000.0, "mode": "BUY_NOW", "purchase_mode": "ASK", "product_id": rice.id if rice else None},
-        {"name": "Anker 100W USB-C Fast Charging Cable 2m", "quantity": 2, "target_price": 850.0, "max_price": 1000.0, "mode": "BUY_NOW", "purchase_mode": "ASK", "product_id": cable.id if cable else None},
-        {"name": "Logitech MX Master 3S Wireless Performance Mouse", "quantity": 1, "target_price": 8000.0, "max_price": 9000.0, "mode": "MONITOR", "purchase_mode": "ASK", "product_id": logi.id if logi else None}
-    ]
-
-    for item_data in items_to_add:
-        it = ShoppingItem(list_id=list_id, **item_data)
-        db.add(it)
-        db.flush()
-        if it.mode == "MONITOR":
-            from .models import MonitoringTask
-            t = MonitoringTask(item_id=it.id, status="WATCHING", last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc) + timedelta(minutes=360))
-            db.add(t)
-
-    db.commit()
+    """Newly registered users start with a clean empty list until they add products."""
+    pass

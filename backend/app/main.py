@@ -207,7 +207,7 @@ def health():return {'status':'ok','version':'3.0.0','environment':'production'}
 def register(p:Register,db:Session=Depends(get_db)):
  email=p.email.lower().strip()
  if db.query(User).filter_by(email=email).first():raise HTTPException(409,'Email already registered')
- u=User(email=email,password_hash=hash_password(p.password));db.add(u);db.flush();db.add(UserPreference(user_id=u.id));sl=ShoppingList(user_id=u.id);db.add(sl);db.flush();seed_user_defaults(db,u.id,sl.id);raw,h,exp=refresh_token(u.id);db.add(RefreshToken(user_id=u.id,token_hash=h,expires_at=exp));db.commit();return {'access_token':access_token(u.id),'refresh_token':raw,'user':{'id':u.id,'email':u.email}}
+ u=User(email=email,password_hash=hash_password(p.password));db.add(u);db.flush();db.add(UserPreference(user_id=u.id));sl=ShoppingList(user_id=u.id);db.add(sl);db.flush();raw,h,exp=refresh_token(u.id);db.add(RefreshToken(user_id=u.id,token_hash=h,expires_at=exp));db.commit();return {'access_token':access_token(u.id),'refresh_token':raw,'user':{'id':u.id,'email':u.email}}
 @app.post('/api/auth/login')
 def login(p:Login,db:Session=Depends(get_db)):
  u=db.query(User).filter_by(email=p.email.lower().strip()).first()
@@ -384,7 +384,22 @@ def update_item(item_id:int,p:ItemUpdate,u=Depends(current_user),db:Session=Depe
 def delete_item(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it:raise HTTPException(404,'Item not found')
- db.delete(it);db.commit();return {'ok':True}
+ db.query(MonitoringTask).filter_by(item_id=it.id).delete()
+ db.query(PriceAlert).filter_by(item_id=it.id).delete()
+ db.query(ItemVote).filter_by(item_id=it.id).delete()
+ db.query(Order).filter_by(item_id=it.id).update({'item_id': None})
+ db.delete(it)
+ db.commit()
+ return {'ok':True}
+
+@app.delete('/api/items/{item_id}/monitor')
+def delete_monitor_by_item(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
+ if not it:raise HTTPException(404,'Item not found')
+ db.query(MonitoringTask).filter_by(item_id=it.id).delete()
+ it.mode = 'BUY_NOW'
+ db.commit()
+ return {'ok':True}
 
 @app.get('/api/ai/status')
 def ai_status(u=Depends(current_user), db:Session=Depends(get_db)):

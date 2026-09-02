@@ -34,10 +34,23 @@ def test_user_registration_and_dashboard_fetch():
         assert 'todo' in dash_data
         assert 'stats' in dash_data
 
-        # Items fetch
+        # Items fetch (clean empty list for fresh user)
         items = c.get('/api/items', headers=headers)
         assert items.status_code == 200
-        assert len(items.json().get('items', [])) >= 1
+        assert len(items.json().get('items', [])) == 0
+
+        # Add an item in MONITOR mode
+        item_res = c.post('/api/items', headers=headers, json={
+            'name': 'Sony WH-1000XM6 Headphones',
+            'mode': 'MONITOR',
+            'target_price': 20000.0
+        })
+        assert item_res.status_code == 200
+        item_id = item_res.json()['id']
+
+        # Delete the monitored item (verifying foreign key cascade works cleanly)
+        del_res = c.delete(f'/api/items/{item_id}', headers=headers)
+        assert del_res.status_code == 200
 
         # Deals fetch
         deals = c.get('/api/deals', headers=headers)
