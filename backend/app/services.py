@@ -364,29 +364,39 @@ class OllamaProvider(AIProvider):
             pass
         return deterministic_parse(text)
 
-class OpenAICompatibleProvider(AIProvider):
-    """Works with OpenAI and compatible hosted APIs. The key stays server-side."""
-    name = 'api'
-    def parse(self, text):
-        if not settings.ai_api_key: return deterministic_parse(text)
+class DynamicUserAIProvider(AIProvider):
+    """User-configured Custom AI / LLM Provider (Groq, DeepSeek, OpenAI, OpenRouter, etc.)"""
+    name = 'custom_user_ai'
+    def __init__(self, base_url: str, api_key: str, model: str):
+        self.base_url = (base_url or 'https://api.openai.com/v1').rstrip('/')
+        self.api_key = api_key or ''
+        self.model = model or 'gpt-4o-mini'
+
+    def parse(self, text: str):
+        if not self.api_key:
+            return deterministic_parse(text)
         try:
             payload = {
-                'model': settings.ai_api_model,
+                'model': self.model,
                 'temperature': 0,
                 'response_format': {'type': 'json_object'},
                 'messages': [
-                    {'role': 'system', 'content': 'Return only JSON with name,quantity,target_price,max_price,mode,purchase_mode. mode is BUY_NOW or MONITOR; purchase_mode is ASK, AUTO, or MONITOR_ONLY.'},
+                    {'role': 'system', 'content': 'Return only a JSON object with keys: name (string), quantity (integer), target_price (number or null), max_price (number or null), mode ("BUY_NOW" or "MONITOR"), purchase_mode ("ASK", "AUTO", or "MONITOR_ONLY").'},
                     {'role': 'user', 'content': text}
                 ]
             }
-            r = httpx.post(settings.ai_api_base_url.rstrip('/') + '/chat/completions',
-                headers={'Authorization': f'Bearer {settings.ai_api_key}', 'Content-Type': 'application/json'},
-                json=payload, timeout=settings.ai_timeout)
+            r = httpx.post(
+                f"{self.base_url}/chat/completions",
+                headers={'Authorization': f'Bearer {self.api_key}', 'Content-Type': 'application/json'},
+                json=payload,
+                timeout=12.0
+            )
             r.raise_for_status()
             raw = r.json()['choices'][0]['message']['content']
             import json
             obj = json.loads(raw)
-            if isinstance(obj, dict) and obj.get('name'): return obj
+            if isinstance(obj, dict) and obj.get('name'):
+                return obj
         except Exception:
             pass
         return deterministic_parse(text)
@@ -403,7 +413,57 @@ def deterministic_parse(text):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip(' .,-')
     return {'name': cleaned or text, 'quantity': q, 'target_price': prices[0] if prices else None, 'max_price': prices[1] if len(prices) > 1 else None, 'mode': mode, 'purchase_mode': purchase}
 
-def get_ai_provider(name=None):
+def test_ai_connection(base_url: str, api_key: str, model: str) -> dict:
+    import time
+    clean_url = (base_url or 'https://api.openai.com/v1').rstrip('/')
+    t0 = time.perf_counter()
+    try:
+        payload = {
+            'model': model or 'gpt-4o-mini',
+            'temperature': 0,
+            'max_tokens': 10,
+            'messages': [
+                {'role': 'user', 'content': 'Hi'}
+            ]
+        }
+        r = httpx.post(
+            f"{clean_url}/chat/completions",
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json=payload,
+            timeout=10.0
+        )
+        latency_ms = round((time.perf_counter() - t0) * 1000)
+        if r.status_code == 200:
+            return {
+                'ok': True,
+                'status': 'CONNECTED',
+                'latency_ms': latency_ms,
+                'model': model,
+                'message': f"Connected successfully in {latency_ms}ms"
+            }
+        else:
+            return {
+                'ok': False,
+                'status': 'ERROR',
+                'latency_ms': latency_ms,
+                'error': f"API returned status {r.status_code}: {r.text[:200]}"
+            }
+    except Exception as exc:
+        latency_ms = round((time.perf_counter() - t0) * 1000)
+        return {
+            'ok': False,
+            'status': 'ERROR',
+            'latency_ms': latency_ms,
+            'error': f"Connection failed: {str(exc)}"
+        }
+
+def get_ai_provider(name=None, pref=None):
+    if pref and getattr(pref, 'custom_ai_enabled', False) and getattr(pref, 'custom_ai_api_key', ''):
+        return DynamicUserAIProvider(
+            base_url=getattr(pref, 'custom_ai_base_url', 'https://api.openai.com/v1'),
+            api_key=getattr(pref, 'custom_ai_api_key', ''),
+            model=getattr(pref, 'custom_ai_model', 'gpt-4o-mini')
+        )
     provider = (name or settings.ai_provider).strip().lower()
     if provider in {'api', 'openai', 'openai-compatible'}: return OpenAICompatibleProvider()
     if provider in {'ollama', 'local', 'local-ollama'}: return OllamaProvider()

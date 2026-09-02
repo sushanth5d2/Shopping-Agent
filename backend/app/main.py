@@ -65,8 +65,30 @@ class Refresh(BaseModel):refresh_token:str
 class Intent(BaseModel):text:str=Field(min_length=1,max_length=2000)
 class ItemIn(BaseModel):name:str=Field(min_length=1,max_length=255);quantity:int=Field(1,ge=1,le=100);target_price:float|None=None;max_price:float|None=None;mode:str='BUY_NOW';purchase_mode:str='ASK'
 class ItemUpdate(BaseModel):name:str|None=None;quantity:int|None=None;target_price:float|None=None;max_price:float|None=None;mode:str|None=None;purchase_mode:str|None=None;status:str|None=None
-class PrefIn(BaseModel):preferred_brands:str='';avoided_brands:str='';preferred_stores:str='';min_seller_rating:float=Field(4,ge=0,le=5);warranty_required:bool=False;global_auto_buy:bool=False;global_max_order:float=Field(5000,ge=0);monthly_max:float=Field(20000,ge=0);emergency_stop:bool=False
-class UrlIn(BaseModel):url:str
+class PrefIn(BaseModel):
+ preferred_brands:str=''
+ avoided_brands:str=''
+ preferred_stores:str=''
+ min_seller_rating:float=Field(4,ge=0,le=5)
+ warranty_required:bool=False
+ global_auto_buy:bool=False
+ global_max_order:float=Field(5000,ge=0)
+ monthly_max:float=Field(20000,ge=0)
+ emergency_stop:bool=False
+ custom_ai_enabled:bool=False
+ custom_ai_provider:str='openai'
+ custom_ai_base_url:str='https://api.openai.com/v1'
+ custom_ai_api_key:str=''
+ custom_ai_model:str='gpt-4o-mini'
+
+class TestAiIn(BaseModel):
+ base_url:str='https://api.openai.com/v1'
+ api_key:str
+ model:str='gpt-4o-mini'
+
+class UrlIn(BaseModel):
+ url:str
+
 class UrlCompareIn(BaseModel):
  url:str
  monitor:bool=False
@@ -256,9 +278,14 @@ def ai_models(u=Depends(current_user)):
  status=ai_provider_status()
  return {'embedded_local':status['embedded_local']['models'],'ollama_installed':status['ollama'].get('models',[]),'cloud_api':status['api']}
 
+@app.post('/api/ai/test')
+def test_ai(p:TestAiIn,u=Depends(current_user)):
+ return test_ai_connection(p.base_url, p.api_key, p.model)
+
 @app.post('/api/intent')
 def intent(p:Intent,u=Depends(current_user),db:Session=Depends(get_db)):
- parsed=get_ai_provider().parse(p.text)
+ pref=db.query(UserPreference).filter_by(user_id=u.id).first()
+ parsed=get_ai_provider(pref=pref).parse(p.text)
  sl=user_list(db,u)
  chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]
  parsed_list=[deterministic_parse(x) for x in chunks] if len(chunks)>1 and not any(k in p.text.lower() for k in ['below','under','monitor']) else [parsed]

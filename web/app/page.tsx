@@ -1105,32 +1105,173 @@ function Compare({ data, back, openDecisionLab }: any) {
 
 function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, busy }: any) {
   const [prefs, setPrefs] = useState(preferences || {});
+  const [testingAi, setTestingAi] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     if (preferences) setPrefs(preferences);
   }, [preferences]);
 
+  const presets: Record<string, { base_url: string; model: string; label: string }> = {
+    openai: { label: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    groq: { label: 'Groq (Fastest ~100ms)', base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+    deepseek: { label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+    openrouter: { label: 'OpenRouter (100+ Models)', base_url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+    custom: { label: 'Custom / Self-Hosted', base_url: prefs.custom_ai_base_url || 'http://localhost:8000/v1', model: prefs.custom_ai_model || 'custom-model' }
+  };
+
+  const applyPreset = (key: string) => {
+    const p = presets[key];
+    if (p) {
+      setPrefs({
+        ...prefs,
+        custom_ai_provider: key,
+        custom_ai_base_url: p.base_url,
+        custom_ai_model: p.model,
+        custom_ai_enabled: true
+      });
+      setTestResult(null);
+    }
+  };
+
+  const runTestAi = async () => {
+    if (!prefs.custom_ai_api_key?.trim()) {
+      setTestResult({ ok: false, error: 'Please enter an API key first' });
+      return;
+    }
+    setTestingAi(true);
+    setTestResult(null);
+    try {
+      const res = await req('/api/ai/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          base_url: prefs.custom_ai_base_url,
+          api_key: prefs.custom_ai_api_key,
+          model: prefs.custom_ai_model
+        })
+      });
+      setTestResult(res);
+    } catch (e: any) {
+      setTestResult({ ok: false, error: e.message || 'Connection test failed' });
+    } finally {
+      setTestingAi(false);
+    }
+  };
+
   return (
     <div className="stack">
-      <PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety & Configuration" />
+      <PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety, Custom AI & Configuration" />
       <div className="settings-grid">
-        <div className="panel">
-          <div className="panel-head"><div><span className="eyebrow">AI ENGINE</span><h3>Local + Cloud AI</h3></div></div>
-          <div className="safety-box">
-            <Bot size={18} />
+
+        {/* Bring Your Own AI (Custom AI & API Keys) */}
+        <div className="panel" style={{ gridColumn: '1 / -1', borderColor: '#6366f1' }}>
+          <div className="panel-head">
             <div>
-              <b>{aiStatus?.configured_provider === 'ollama' ? 'Ollama Local AI' : 'Deterministic & Local AI'}</b>
-              <span>{aiStatus?.ollama?.available ? `Ollama online • ${aiStatus.ollama.model}` : 'Running built-in high-precision deterministic parser'}</span>
+              <span className="eyebrow" style={{ color: '#818cf8' }}>BRING YOUR OWN AI (BYO-AI)</span>
+              <h3>Custom AI & API Key Provider</h3>
             </div>
-            <span className="status green">ACTIVE</span>
+            <Sparkles size={20} color="#818cf8" />
+          </div>
+          <p style={{ fontSize: 13, color: '#cbd5e1', margin: '4px 0 16px' }}>
+            Plug in your own API key from Groq, DeepSeek, OpenAI, OpenRouter, or private self-hosted endpoints.
+          </p>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+            {Object.entries(presets).map(([key, p]) => (
+              <button
+                key={key}
+                type="button"
+                className={`filter ${prefs.custom_ai_provider === key ? 'active' : ''}`}
+                onClick={() => applyPreset(key)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>API Base URL</label>
+              <input
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
+                value={prefs.custom_ai_base_url || ''}
+                onChange={e => setPrefs({ ...prefs, custom_ai_base_url: e.target.value })}
+                placeholder="https://api.openai.com/v1"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Model Name</label>
+              <input
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
+                value={prefs.custom_ai_model || ''}
+                onChange={e => setPrefs({ ...prefs, custom_ai_model: e.target.value })}
+                placeholder="gpt-4o-mini / llama-3.3-70b-versatile"
+              />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <label style={{ fontSize: 13, color: '#cbd5e1' }}>API Key</label>
+                <button type="button" onClick={() => setShowKey(!showKey)} style={{ background: 'transparent', border: 'none', color: '#818cf8', fontSize: 12, cursor: 'pointer' }}>
+                  {showKey ? 'Hide key' : 'Show key'}
+                </button>
+              </div>
+              <input
+                type={showKey ? 'text' : 'password'}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
+                value={prefs.custom_ai_api_key || ''}
+                onChange={e => setPrefs({ ...prefs, custom_ai_api_key: e.target.value })}
+                placeholder="sk-..."
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <SettingToggle
+              title="Activate Custom AI"
+              text="Use this custom model for search intent, comparison logic, and Decision Lab intelligence."
+              value={prefs.custom_ai_enabled}
+              onChange={(v: boolean) => setPrefs({ ...prefs, custom_ai_enabled: v })}
+            />
+          </div>
+
+          {testResult && (
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 6, background: testResult.ok ? '#064e3b' : '#7f1d1d', color: '#fff', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{testResult.ok ? `⚡ ${testResult.message} (${testResult.model})` : `⚠️ ${testResult.error}`}</span>
+              <span className={`status ${testResult.ok ? 'green' : 'orange'}`}>{testResult.status}</span>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <button className="secondary" type="button" onClick={runTestAi} disabled={testingAi}>
+              {testingAi ? 'Testing connection…' : <>⚡ Test API Connection</>}
+            </button>
+            <button className="primary" type="button" onClick={() => savePreferences(prefs)} disabled={busy}>
+              {busy ? 'Saving…' : 'Save & Activate Custom AI'}
+            </button>
           </div>
         </div>
 
+        {/* Built-in Status */}
+        <div className="panel">
+          <div className="panel-head"><div><span className="eyebrow">SYSTEM ENGINES</span><h3>Built-In AI Status</h3></div></div>
+          <div className="safety-box">
+            <Bot size={18} />
+            <div>
+              <b>{prefs.custom_ai_enabled && prefs.custom_ai_api_key ? `Custom AI Active (${prefs.custom_ai_model})` : 'Deterministic & Local AI'}</b>
+              <span>{prefs.custom_ai_enabled && prefs.custom_ai_api_key ? `Routing through ${prefs.custom_ai_base_url}` : 'Running built-in high-precision deterministic parser'}</span>
+            </div>
+            <span className="status green">READY</span>
+          </div>
+        </div>
+
+        {/* Appearance */}
         <div className="panel">
           <div className="panel-head"><div><span className="eyebrow">APPEARANCE</span><h3>Interface</h3></div></div>
           <SettingToggle title="Dark mode" text="Use the high-contrast unblurred command-center theme." value={dark} onChange={setDark} />
         </div>
 
+        {/* Safety Limits */}
         <div className="panel">
           <div className="panel-head"><div><span className="eyebrow">PURCHASE SAFETY LIMITS</span><h3>Autonomous buying rules</h3></div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1147,6 +1288,7 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
           </div>
         </div>
 
+        {/* Telegram Notifications */}
         <div className="panel">
           <div className="panel-head"><div><span className="eyebrow">NOTIFICATIONS</span><h3>Telegram Push Alerts</h3></div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
