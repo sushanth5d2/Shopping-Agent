@@ -2,18 +2,55 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+function getDynamicBackendCandidates(req: NextRequest): string[] {
+  const list: string[] = [];
+
+  // 1. Explicit internal or custom environment overrides if defined
+  if (process.env.BACKEND_INTERNAL_URL) list.push(process.env.BACKEND_INTERNAL_URL);
+  if (process.env.NEXT_PUBLIC_API_URL) list.push(process.env.NEXT_PUBLIC_API_URL);
+
+  // 2. Automatically detect GitHub Codespaces environment variables
+  const codespaceName = process.env.CODESPACE_NAME;
+  const forwardingDomain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN || 'app.github.dev';
+  if (codespaceName) {
+    list.push(`https://${codespaceName}-8000.${forwardingDomain}`);
+    list.push(`http://${codespaceName}-8000.${forwardingDomain}`);
+  }
+
+  // 3. Dynamically inspect incoming Host / Forwarded headers from any browser URL
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
+  const proto = req.headers.get('x-forwarded-proto') || 'https';
+
+  if (host.includes('-3000.')) {
+    // Automatically convert port 3000 Codespaces/proxy subdomain to port 8000
+    list.push(`${proto}://${host.replace('-3000.', '-8000.')}`);
+    list.push(`http://${host.replace('-3000.', '-8000.')}`);
+  }
+
+  // 4. Container network aliases (Docker Compose / Kubernetes)
+  list.push('http://backend:8000');
+  list.push('http://shopagent-backend:8000');
+
+  // 5. Localhost / loopback fallbacks for bare-metal & dev server
+  list.push('http://127.0.0.1:8000');
+  list.push('http://localhost:8000');
+
+  // Deduplicate candidates while preserving priority order
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const url of list) {
+    if (url && !seen.has(url)) {
+      seen.add(url);
+      deduped.push(url);
+    }
+  }
+  return deduped;
+}
+
 async function handler(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const params = await context.params;
   const pathStr = (params?.path || []).join('/');
-
-  const candidateUrls = [
-    process.env.BACKEND_INTERNAL_URL,
-    'http://backend:8000',
-    'http://shopagent-backend:8000',
-    process.env.NEXT_PUBLIC_API_URL,
-    'http://127.0.0.1:8000',
-    'http://localhost:8000'
-  ].filter(Boolean) as string[];
+  const candidateUrls = getDynamicBackendCandidates(request);
 
   const urlObj = new URL(request.url);
   const search = urlObj.search;
@@ -34,12 +71,17 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
 
       const body = ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer();
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       const response = await fetch(targetUrl, {
         method: request.method,
         headers,
         body,
         cache: 'no-store',
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const resHeaders = new Headers();
       response.headers.forEach((value, key) => {
