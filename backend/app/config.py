@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     cors_origins: str = '*'
     ollama_base_url: str = 'http://localhost:11434'
     ollama_model: str = 'qwen3:8b'
-    ai_provider: str = 'ollama'
+    ai_provider: str = 'builtin'
     ai_api_base_url: str = 'https://api.openai.com/v1'
     ai_api_key: str = ''
     ai_api_model: str = 'gpt-4o-mini'
