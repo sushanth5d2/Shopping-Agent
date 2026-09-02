@@ -218,7 +218,6 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
    price=price,
    delivery=deliv,
    stock=1,
-   seller=seller_name,
    warranty=s_info.get('badge', '100% Genuine Verified'),
    returns=s_info.get('delivery_time', 'Standard Return Policy')
   )
