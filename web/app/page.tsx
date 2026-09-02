@@ -1277,6 +1277,17 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
     }
   };
 
+  const resetToDefaultAi = async () => {
+    const updated = {
+      ...prefs,
+      custom_ai_enabled: false
+    };
+    setPrefs(updated);
+    setTestResult(null);
+    await savePreferences(updated);
+    refreshAiStatus();
+  };
+
   return (
     <div className="stack">
       <PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety, Custom AI & Configuration" />
@@ -1292,15 +1303,23 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
             <Sparkles size={20} color="#818cf8" />
           </div>
           <p style={{ fontSize: 13, color: '#cbd5e1', margin: '4px 0 16px' }}>
-            Plug in your own API key from Groq, DeepSeek, OpenAI, OpenRouter, or private self-hosted endpoints.
+            Plug in your own API key from Groq, DeepSeek, OpenAI, OpenRouter, or private self-hosted endpoints. You can switch back to the Built-In engine at any time.
           </p>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+            <button
+              type="button"
+              className={`filter ${!prefs.custom_ai_enabled ? 'active' : ''}`}
+              onClick={resetToDefaultAi}
+              style={{ borderColor: !prefs.custom_ai_enabled ? '#10b981' : undefined, color: !prefs.custom_ai_enabled ? '#34d399' : undefined }}
+            >
+              ⚡ Built-In AI (Default)
+            </button>
             {Object.entries(presets).map(([key, p]) => (
               <button
                 key={key}
                 type="button"
-                className={`filter ${prefs.custom_ai_provider === key ? 'active' : ''}`}
+                className={`filter ${prefs.custom_ai_enabled && prefs.custom_ai_provider === key ? 'active' : ''}`}
                 onClick={() => applyPreset(key)}
               >
                 {p.label}
@@ -1360,13 +1379,23 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
             <button className="secondary" type="button" onClick={runTestAi} disabled={testingAi}>
               {testingAi ? 'Testing connection…' : <>⚡ Test API Connection</>}
             </button>
             <button className="primary" type="button" onClick={async () => { await savePreferences(prefs); refreshAiStatus(); }} disabled={busy}>
               {busy ? 'Saving…' : 'Save & Activate Custom AI'}
             </button>
+            {prefs.custom_ai_enabled && (
+              <button
+                className="secondary"
+                type="button"
+                onClick={resetToDefaultAi}
+                style={{ borderColor: '#10b981', color: '#34d399' }}
+              >
+                ⚡ Reset to Built-In AI
+              </button>
+            )}
           </div>
         </div>
 
