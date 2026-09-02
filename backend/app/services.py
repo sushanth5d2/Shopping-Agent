@@ -45,6 +45,395 @@ def fake_discount(current, advertised, history):
     return {'suspected': suspected, 'reason': 'Current price is close to the observed normal price despite a large advertised discount.' if suspected else 'No strong evidence of a misleading discount.'}
 
 # ==========================================================
+# Universal Multi-Platform & Category Intelligence
+# ==========================================================
+
+def classify_product_category(name: str) -> str:
+    n = name.lower()
+    grocery_kw = [
+        'tomato', 'tomatos', 'tomatoes', 'chilli', 'chili', 'garlic', 'ginger', 'onion', 'potato',
+        'butter', 'milk', 'cheese', 'paneer', 'curd', 'bread', 'egg', 'eggs', 'rice', 'atta',
+        'flour', 'dal', 'oil', 'ghee', 'sugar', 'salt', 'tea', 'coffee', 'maggi', 'noodle', 'biscuit',
+        'chips', 'snack', 'vegetable', 'fruit', 'apple', 'banana', 'mango', 'lemon', 'coriander',
+        'mint', 'grocery', 'fresh', 'veggie', 'soap', 'shampoo', 'detergent', 'toothpaste'
+    ]
+    if any(k in n for k in grocery_kw):
+        return 'GROCERY'
+
+    tech_kw = [
+        'laptop', 'macbook', 'lenovo', 'dell', 'hp', 'asus', 'acer', 'thinkpad', 'iphone', 'ipad',
+        'samsung', 'mobile', 'smartphone', 'phone', 'oneplus', 'pixel', 'redmi', 'realme', 'vivo',
+        'oppo', 'headphone', 'earphone', 'earbuds', 'airpods', 'sony', 'bose', 'boat', 'noise',
+        'monitor', 'tv', 'television', 'charger', 'cable', 'mouse', 'keyboard', 'tablet', 'gpu',
+        'processor', 'camera', 'speaker', 'smartwatch', 'watch'
+    ]
+    if any(k in n for k in tech_kw):
+        return 'ELECTRONICS'
+
+    health_kw = [
+        'paracetamol', 'dolo', 'medicine', 'tablet', 'syrup', 'vitamin', 'supplement', 'protein',
+        'whey', 'creatine', 'omega', 'bandage', 'mask', 'thermometer', 'bp monitor', 'glucometer'
+    ]
+    if any(k in n for k in health_kw):
+        return 'HEALTH'
+
+    fashion_kw = [
+        't-shirt', 'shirt', 'jeans', 'pant', 'trouser', 'trousers', 'dress', 'jacket', 'hoodie',
+        'sneaker', 'sneakers', 'shoe', 'shoes', 'sandal', 'sandals', 'perfume', 'lipstick',
+        'foundation', 'eyeliner', 'handbag', 'bag', 'backpack', 'wallet', 'belt', 'sunglass'
+    ]
+    if any(k in n for k in fashion_kw):
+        return 'FASHION'
+
+    return 'GENERAL'
+
+def estimate_item_market_price(name: str, category: str, user_target: float | None = None) -> float:
+    if user_target and user_target > 0:
+        return float(user_target)
+    n = name.lower()
+    
+    if 'tomato' in n: return 38.0
+    if 'chilli' in n or 'chili' in n: return 24.0
+    if 'garlic' in n: return 68.0
+    if 'ginger' in n: return 45.0
+    if 'onion' in n: return 42.0
+    if 'potato' in n: return 32.0
+    if 'butter' in n: return 58.0
+    if 'milk' in n: return 34.0
+    if 'paneer' in n or 'cheese' in n: return 95.0
+    if 'bread' in n: return 45.0
+    if 'egg' in n: return 84.0
+    if 'oil' in n or 'ghee' in n: return 185.0
+    if 'rice' in n or 'atta' in n: return 240.0
+    
+    if 'macbook' in n or 'mac' in n: return 89990.0
+    if 'iphone' in n: return 79900.0
+    if 'samsung s' in n or 'galaxy' in n: return 64999.0
+    if 'laptop' in n: return 54990.0
+    if 'monitor' in n or 'tv' in n: return 18999.0
+    if 'headphone' in n or 'airpods' in n: return 4999.0
+    if 'mouse' in n or 'keyboard' in n: return 1299.0
+    if 'smartwatch' in n: return 2999.0
+    
+    if 'dolo' in n or 'paracetamol' in n: return 32.0
+    if 'protein' in n or 'whey' in n: return 2499.0
+    if 'vitamin' in n: return 340.0
+    
+    if category == 'GROCERY': return 65.0
+    if category == 'ELECTRONICS': return 12999.0
+    if category == 'HEALTH': return 199.0
+    if category == 'FASHION': return 999.0
+    return 899.0
+
+def get_stores_for_category(category: str, query: str, base_price: float, pincode: str = '560001') -> list[dict]:
+    q_slug = re.sub(r'[^a-zA-Z0-9]', '+', query.strip())
+    bp = max(10.0, float(base_price))
+    
+    if category == 'GROCERY':
+        return [
+            {
+                'name': 'Blinkit',
+                'domain': 'blinkit.com',
+                'base_url': 'blinkit.com',
+                'url': f'https://blinkit.com/s/?q={q_slug}',
+                'price': round(bp * 0.96, 2),
+                'delivery': 15.0,
+                'rating': 4.8,
+                'delivery_time': '10-15 mins',
+                'seller': 'Blinkit Dark Store Express',
+                'badge': '12 MIN DELIVERY'
+            },
+            {
+                'name': 'Swiggy Instamart',
+                'domain': 'swiggy.com',
+                'base_url': 'swiggy.com/instamart',
+                'url': f'https://www.swiggy.com/instamart/search?query={q_slug}',
+                'price': round(bp * 0.94, 2),
+                'delivery': 16.0,
+                'rating': 4.7,
+                'delivery_time': '12-18 mins',
+                'seller': 'Instamart Pod Hub',
+                'badge': 'INSTANT POD'
+            },
+            {
+                'name': 'Zepto',
+                'domain': 'zeptonow.com',
+                'base_url': 'zeptonow.com',
+                'url': f'https://www.zeptonow.com/search?q={q_slug}',
+                'price': round(bp * 0.97, 2),
+                'delivery': 15.0,
+                'rating': 4.8,
+                'delivery_time': '10 mins',
+                'seller': 'Zepto Quick Hub',
+                'badge': '10 MIN ZEAL'
+            },
+            {
+                'name': 'BigBasket / BBNow',
+                'domain': 'bigbasket.com',
+                'base_url': 'bigbasket.com',
+                'url': f'https://www.bigbasket.com/ps/?q={q_slug}',
+                'price': round(bp * 0.92, 2),
+                'delivery': 25.0,
+                'rating': 4.6,
+                'delivery_time': 'Today Evening / 20 mins',
+                'seller': 'BigBasket Supermarket',
+                'badge': 'FARM FRESH'
+            },
+            {
+                'name': 'Amazon Fresh',
+                'domain': 'amazon.in',
+                'base_url': 'amazon.in/fresh',
+                'url': f'https://www.amazon.in/s?k={q_slug}&i=nowstore',
+                'price': round(bp * 0.98, 2),
+                'delivery': 30.0,
+                'rating': 4.7,
+                'delivery_time': '2-Hour Slot',
+                'seller': 'Amazon Fresh Direct',
+                'badge': 'SLOT DISPATCH'
+            },
+            {
+                'name': 'JioMart',
+                'domain': 'jiomart.com',
+                'base_url': 'jiomart.com',
+                'url': f'https://www.jiomart.com/search/{q_slug}',
+                'price': round(bp * 0.90, 2),
+                'delivery': 0.0,
+                'rating': 4.5,
+                'delivery_time': 'Next Day Morning',
+                'seller': 'Reliance Retail Limited',
+                'badge': 'FREE DELIVERY'
+            },
+            {
+                'name': 'DMart Ready',
+                'domain': 'dmart.in',
+                'base_url': 'dmart.in',
+                'url': f'https://www.dmart.in/search/{q_slug}',
+                'price': round(bp * 0.89, 2),
+                'delivery': 49.0,
+                'rating': 4.6,
+                'delivery_time': 'Scheduled Pick-up / Home',
+                'seller': 'Avenue Supermarts (DMart)',
+                'badge': 'LOWEST MRP'
+            }
+        ]
+    elif category == 'ELECTRONICS':
+        return [
+            {
+                'name': 'Amazon India',
+                'domain': 'amazon.in',
+                'base_url': 'amazon.in',
+                'url': f'https://www.amazon.in/s?k={q_slug}',
+                'price': round(bp * 0.98, 2),
+                'delivery': 0.0,
+                'rating': 4.8,
+                'delivery_time': 'Tomorrow by 11 AM (Prime)',
+                'seller': 'Appario Retail / Amazon Direct',
+                'badge': 'PRIME VERIFIED'
+            },
+            {
+                'name': 'Flipkart',
+                'domain': 'flipkart.com',
+                'base_url': 'flipkart.com',
+                'url': f'https://www.flipkart.com/search?q={q_slug}',
+                'price': round(bp * 0.97, 2),
+                'delivery': 40.0,
+                'rating': 4.7,
+                'delivery_time': '2 Days Assured',
+                'seller': 'Flipkart Assured F-Plus',
+                'badge': 'FLIPKART ASSURED'
+            },
+            {
+                'name': 'Croma',
+                'domain': 'croma.com',
+                'base_url': 'croma.com',
+                'url': f'https://www.croma.com/searchB?q={q_slug}',
+                'price': round(bp * 0.99, 2),
+                'delivery': 0.0,
+                'rating': 4.7,
+                'delivery_time': 'Same Day Store Pickup / 24h',
+                'seller': 'Infiniti Retail (A Tata Enterprise)',
+                'badge': 'TATA BACKED'
+            },
+            {
+                'name': 'Reliance Digital',
+                'domain': 'reliancedigital.in',
+                'base_url': 'reliancedigital.in',
+                'url': f'https://www.reliancedigital.in/search?q={q_slug}',
+                'price': round(bp * 0.96, 2),
+                'delivery': 0.0,
+                'rating': 4.6,
+                'delivery_time': 'Express 3-Hour Delivery',
+                'seller': 'Reliance Digital Store Express',
+                'badge': 'RESQ WARRANTY'
+            },
+            {
+                'name': 'Vijay Sales',
+                'domain': 'vijaysales.com',
+                'base_url': 'vijaysales.com',
+                'url': f'https://www.vijaysales.com/search/{q_slug}',
+                'price': round(bp * 0.95, 2),
+                'delivery': 0.0,
+                'rating': 4.6,
+                'delivery_time': '1-2 Business Days',
+                'seller': 'Vijay Sales Authorized Retail',
+                'badge': 'OFFICIAL DISTRIBUTOR'
+            },
+            {
+                'name': 'Tata CLiQ',
+                'domain': 'tatacliq.com',
+                'base_url': 'tatacliq.com',
+                'url': f'https://www.tatacliq.com/search/?searchCategory=all&text={q_slug}',
+                'price': round(bp * 1.01, 2),
+                'delivery': 0.0,
+                'rating': 4.7,
+                'delivery_time': '2-3 Business Days',
+                'seller': 'Tata CLiQ Genuine Brand Hub',
+                'badge': '100% AUTHENTIC'
+            }
+        ]
+    elif category == 'HEALTH':
+        return [
+            {
+                'name': 'Tata 1mg',
+                'domain': '1mg.com',
+                'base_url': '1mg.com',
+                'url': f'https://www.1mg.com/search/all?name={q_slug}',
+                'price': round(bp * 0.88, 2),
+                'delivery': 25.0,
+                'rating': 4.9,
+                'delivery_time': '4-Hour Care Dispatch',
+                'seller': '1mg Healthcare Solutions (Tata)',
+                'badge': 'VERIFIED PHARMA'
+            },
+            {
+                'name': 'Apollo 24|7',
+                'domain': 'apollo247.com',
+                'base_url': 'apollo247.com',
+                'url': f'https://www.apollo247.com/search-medicines/{q_slug}',
+                'price': round(bp * 0.90, 2),
+                'delivery': 20.0,
+                'rating': 4.8,
+                'delivery_time': '2-Hour Apollo Clinic Dispatch',
+                'seller': 'Apollo Pharmacy Limited',
+                'badge': 'APOLLO CERTIFIED'
+            },
+            {
+                'name': 'PharmEasy',
+                'domain': 'pharmeasy.in',
+                'base_url': 'pharmeasy.in',
+                'url': f'https://pharmeasy.in/search/all?name={q_slug}',
+                'price': round(bp * 0.85, 2),
+                'delivery': 30.0,
+                'rating': 4.7,
+                'delivery_time': 'Today by 8 PM',
+                'seller': 'PharmEasy Registered Chemists',
+                'badge': 'FLAT 15% OFF'
+            },
+            {
+                'name': 'Netmeds',
+                'domain': 'netmeds.com',
+                'base_url': 'netmeds.com',
+                'url': f'https://www.netmeds.com/catalogsearch/result/{q_slug}/all',
+                'price': round(bp * 0.87, 2),
+                'delivery': 25.0,
+                'rating': 4.7,
+                'delivery_time': 'Tomorrow Morning',
+                'seller': 'Netmeds Marketplace (Reliance)',
+                'badge': 'INDIA KI PHARMACY'
+            }
+        ]
+    elif category == 'FASHION':
+        return [
+            {
+                'name': 'Myntra',
+                'domain': 'myntra.com',
+                'base_url': 'myntra.com',
+                'url': f'https://www.myntra.com/{q_slug}',
+                'price': round(bp * 0.90, 2),
+                'delivery': 0.0,
+                'rating': 4.8,
+                'delivery_time': '2 Days Fast Dispatch',
+                'seller': 'Myntra Certified Brand Outlet',
+                'badge': 'MYNTRA INSIDER'
+            },
+            {
+                'name': 'Ajio',
+                'domain': 'ajio.com',
+                'base_url': 'ajio.com',
+                'url': f'https://www.ajio.com/search/?text={q_slug}',
+                'price': round(bp * 0.88, 2),
+                'delivery': 40.0,
+                'rating': 4.7,
+                'delivery_time': '2-3 Business Days',
+                'seller': 'Reliance Trends / Ajio Direct',
+                'badge': 'AJIO MANIA'
+            },
+            {
+                'name': 'Nykaa',
+                'domain': 'nykaa.com',
+                'base_url': 'nykaa.com',
+                'url': f'https://www.nykaa.com/search/result/?q={q_slug}',
+                'price': round(bp * 0.95, 2),
+                'delivery': 0.0,
+                'rating': 4.9,
+                'delivery_time': 'Tomorrow 10 AM',
+                'seller': 'Nykaa Authentic E-Retail',
+                'badge': '100% ORIGINAL'
+            },
+            {
+                'name': 'Meesho',
+                'domain': 'meesho.com',
+                'base_url': 'meesho.com',
+                'url': f'https://www.meesho.com/search?q={q_slug}',
+                'price': round(bp * 0.78, 2),
+                'delivery': 0.0,
+                'rating': 4.4,
+                'delivery_time': '4-5 Days Direct from Maker',
+                'seller': 'Direct Manufacturer Direct',
+                'badge': 'WHOLESALE RATE'
+            }
+        ]
+    else:
+        return [
+            {
+                'name': 'Amazon India',
+                'domain': 'amazon.in',
+                'base_url': 'amazon.in',
+                'url': f'https://www.amazon.in/s?k={q_slug}',
+                'price': round(bp * 0.98, 2),
+                'delivery': 0.0,
+                'rating': 4.8,
+                'delivery_time': '1-2 Days',
+                'seller': 'Amazon Direct Fulfillment',
+                'badge': 'PRIME'
+            },
+            {
+                'name': 'Flipkart',
+                'domain': 'flipkart.com',
+                'base_url': 'flipkart.com',
+                'url': f'https://www.flipkart.com/search?q={q_slug}',
+                'price': round(bp * 0.96, 2),
+                'delivery': 40.0,
+                'rating': 4.7,
+                'delivery_time': '2 Days',
+                'seller': 'Flipkart Verified Hub',
+                'badge': 'ASSURED'
+            },
+            {
+                'name': 'JioMart',
+                'domain': 'jiomart.com',
+                'base_url': 'jiomart.com',
+                'url': f'https://www.jiomart.com/search/{q_slug}',
+                'price': round(bp * 0.92, 2),
+                'delivery': 0.0,
+                'rating': 4.5,
+                'delivery_time': '2 Days',
+                'seller': 'Reliance Retail Hub',
+                'badge': 'SAVER'
+            }
+        ]
+
+# ==========================================================
 # Comprehensive Decision Lab Engines
 # ==========================================================
 

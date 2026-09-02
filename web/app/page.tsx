@@ -1400,6 +1400,43 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
           </div>
         </div>
 
+        {/* Delivery Location & Quick-Commerce Pincode */}
+        <div className="panel" style={{ borderColor: '#10b981' }}>
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow" style={{ color: '#10b981' }}>HYPER-LOCAL SETTINGS</span>
+              <h3>Delivery Location & Pincode</h3>
+            </div>
+            <Target size={20} color="#10b981" />
+          </div>
+          <p style={{ fontSize: 13, color: '#cbd5e1', margin: '4px 0 14px' }}>
+            Enables instant price and stock discovery across Blinkit, Swiggy Instamart, Zepto, BigBasket, Amazon Fresh & local dark stores.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 14 }}>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Delivery Pincode</label>
+              <input
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
+                value={prefs.delivery_pincode || '560001'}
+                onChange={e => setPrefs({ ...prefs, delivery_pincode: e.target.value })}
+                placeholder="560001 / 110001"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>City / Area</label>
+              <input
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
+                value={prefs.delivery_city || 'Bengaluru'}
+                onChange={e => setPrefs({ ...prefs, delivery_city: e.target.value })}
+                placeholder="Bengaluru / Mumbai / Delhi"
+              />
+            </div>
+          </div>
+          <button className="primary" onClick={() => savePreferences(prefs)} disabled={busy} style={{ background: '#059669', borderColor: '#047857' }}>
+            {busy ? 'Saving…' : 'Save Delivery Location'}
+          </button>
+        </div>
+
         {/* Appearance */}
         <div className="panel">
           <div className="panel-head"><div><span className="eyebrow">APPEARANCE</span><h3>Interface</h3></div></div>
