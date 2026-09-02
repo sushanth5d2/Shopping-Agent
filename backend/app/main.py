@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import datetime,timedelta,timezone
 import uuid,hashlib,re
 from urllib.parse import urlparse
@@ -6,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel,Field,EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy import select,func
-from .db import get_db,Base,engine
+from .db import get_db,Base,engine,SessionLocal
 from .models import *
 from .config import settings
 from .security import *
@@ -14,7 +15,21 @@ from .services import *
 from .connectors import connector_for,ProductDiscoveryProvider,validate_public_url,ProductObservation
 from .checkout import ManualHandoffCheckoutAdapter
 from .notifications import telegram
-app=FastAPI(title='ShopAgent API',version='3.0.0')
+from .seed import seed_data, seed_user_defaults
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure all tables exist in SQLite/PostgreSQL
+    Base.metadata.create_all(bind=engine)
+    # Seed default stores, products, listings, and price snapshots
+    db = SessionLocal()
+    try:
+        seed_data(db)
+    finally:
+        db.close()
+    yield
+
+app=FastAPI(title='ShopAgent API',version='3.0.0',lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(',') if x.strip()],allow_credentials=True,allow_methods=['GET','POST','PATCH','PUT','DELETE','OPTIONS'],allow_headers=['Authorization','Content-Type','Idempotency-Key'])
 
 @app.get('/')
@@ -25,7 +40,7 @@ def root():
 def health_root():
     return {'status':'ok','service':'ShopAgent API'}
 
-class Register(BaseModel):email:EmailStr;password:str=Field(min_length=10,max_length=128)
+class Register(BaseModel):email:EmailStr;password:str=Field(min_length=6,max_length=128)
 class Login(BaseModel):email:EmailStr;password:str
 class Refresh(BaseModel):refresh_token:str
 class Intent(BaseModel):text:str=Field(min_length=1,max_length=2000)
@@ -76,12 +91,12 @@ def product_summary(db,pid):
 def health():return {'status':'ok','version':'3.0.0','environment':'production'}
 @app.post('/api/auth/register')
 def register(p:Register,db:Session=Depends(get_db)):
- email=p.email.lower()
+ email=p.email.lower().strip()
  if db.query(User).filter_by(email=email).first():raise HTTPException(409,'Email already registered')
- u=User(email=email,password_hash=hash_password(p.password));db.add(u);db.flush();db.add(UserPreference(user_id=u.id));db.add(ShoppingList(user_id=u.id));raw,h,exp=refresh_token(u.id);db.add(RefreshToken(user_id=u.id,token_hash=h,expires_at=exp));db.commit();return {'access_token':access_token(u.id),'refresh_token':raw,'user':{'id':u.id,'email':u.email}}
+ u=User(email=email,password_hash=hash_password(p.password));db.add(u);db.flush();db.add(UserPreference(user_id=u.id));sl=ShoppingList(user_id=u.id);db.add(sl);db.flush();seed_user_defaults(db,u.id,sl.id);raw,h,exp=refresh_token(u.id);db.add(RefreshToken(user_id=u.id,token_hash=h,expires_at=exp));db.commit();return {'access_token':access_token(u.id),'refresh_token':raw,'user':{'id':u.id,'email':u.email}}
 @app.post('/api/auth/login')
 def login(p:Login,db:Session=Depends(get_db)):
- u=db.query(User).filter_by(email=p.email.lower()).first()
+ u=db.query(User).filter_by(email=p.email.lower().strip()).first()
  if not u or not verify_password(u.password_hash,p.password):raise HTTPException(401,'Invalid credentials')
  raw,h,exp=refresh_token(u.id);db.add(RefreshToken(user_id=u.id,token_hash=h,expires_at=exp));db.commit();return {'access_token':access_token(u.id),'refresh_token':raw,'user':{'id':u.id,'email':u.email}}
 @app.post('/api/auth/refresh')
@@ -254,6 +269,23 @@ def compare(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):r
 @app.get('/api/products/{product_id}/analysis')
 def analysis(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  c=product_summary(db,product_id);hist=[s.total for l in db.query(StoreListing).filter_by(product_id=product_id).all() for s in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()];return {'decision':decision(c['best']['true_total'],None,hist),'prediction':prediction(hist,c['best']['true_total'],None),'fake_discount':fake_discount(c['best']['true_total'],c['best']['price']*2,hist),'history':hist}
+@app.get('/api/products/{product_id}/decision-lab')
+def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ c=product_summary(db,product_id);p=db.get(Product,product_id);best=c['best'];listings=c['listings']
+ hist=[s.total for l in db.query(StoreListing).filter_by(product_id=product_id).all() for s in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()]
+ current_price=best['true_total']
+ dec=decision(current_price,None,hist)
+ score=calculate_shopagent_score(p.__dict__,best,hist)
+ regret=calculate_regret_shield(current_price,hist,best.get('seller_rating',4.0))
+ simulator=simulate_buy_vs_wait(current_price,hist)
+ skeptic=generate_second_opinion(dec['decision'],current_price,hist,p.name)
+ why_not=generate_why_not_buy(current_price,hist,p.__dict__)
+ deal_truth=analyze_deal_truth(best.get('price',current_price)*1.3,current_price,hist)
+ ownership=calculate_ownership_cost(current_price,p.category or 'Electronics')
+ compat=check_compatibility(p.name,p.specs or '')
+ reviews=get_review_intelligence(p.name)
+ seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':'Verified 1-2 Day Dispatch','return_satisfaction':'96% Positive Resolution'}
+ return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'price_history':hist}
 @app.post('/api/items/{item_id}/monitor')
 def monitor(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()

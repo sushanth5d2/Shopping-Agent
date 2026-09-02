@@ -1,10 +1,18 @@
 """initial schema"""
 from alembic import op
 import sqlalchemy as sa
-revision='0001_initial';down_revision=None;branch_labels=None;depends_on=None
+from app.db import Base
+from app import models
+
+revision = '0001_initial'
+down_revision = None
+branch_labels = None
+depends_on = None
+
 def upgrade():
- from app.db import Base,engine
- Base.metadata.create_all(engine)
+    bind = op.get_bind()
+    Base.metadata.create_all(bind=bind)
+
 def downgrade():
- from app.db import Base,engine
- Base.metadata.drop_all(engine)
+    bind = op.get_bind()
+    Base.metadata.drop_all(bind=bind)

@@ -1,1 +1,15 @@
-{"name":"shopagent-extension","version":"4.0.0","private":true,"scripts":{"build":"esbuild src/popup.ts --bundle --format=iife --platform=browser --outfile=dist/popup.js && esbuild src/content.ts --bundle --format=iife --platform=browser --outfile=dist/content.js && cp popup.html dist/popup.html && cp manifest.json dist/manifest.json"},"devDependencies":{"typescript":"^5.7.3","esbuild":"^0.25.0"},"dependencies":{"@huggingface/transformers":"^4.2.0"}}
+{
+  "name": "shopagent-extension",
+  "version": "4.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  }
+}

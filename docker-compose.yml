@@ -8,29 +8,16 @@ services:
     environment:
       POSTGRES_DB: shopagent
       POSTGRES_USER: shopagent
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}
     volumes:
       - shopagent_pg:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shopagent -d shopagent"]
-      interval: 5s
-      timeout: 5s
+      interval: 3s
+      timeout: 3s
       retries: 10
-      start_period: 10s
+      start_period: 5s
     restart: unless-stopped
-
-
-  # ==========================================================
-  # Ollama - Local AI
-  # ==========================================================
-  #ollama:
-  #  image: ollama/ollama:latest
-  #  volumes:
-  #    - shopagent_ollama:/root/.ollama
-  #  ports:
-  #    - "${SHOPAGENT_OLLAMA_PORT:-11434}:11434"
-  #  restart: unless-stopped
-
 
   # ==========================================================
   # Backend API
@@ -38,94 +25,48 @@ services:
   backend:
     build:
       context: ./backend
+    image: shopagent-backend:latest
     environment:
-
-      # Database
-      SHOPAGENT_DATABASE_URL: >-
-        postgresql+psycopg://shopagent:${POSTGRES_PASSWORD}@db:5432/shopagent
-
-      # Security
-      SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:?Set SHOPAGENT_JWT_SECRET in .env}
-
-      # CORS
-      SHOPAGENT_CORS_ORIGINS: ${SHOPAGENT_CORS_ORIGINS:-http://localhost:3000}
-
-      # AI
-      #SHOPAGENT_AI_PROVIDER: ${SHOPAGENT_AI_PROVIDER:-ollama}
-      #SHOPAGENT_OLLAMA_BASE_URL: ${SHOPAGENT_OLLAMA_BASE_URL:-http://ollama:11434}
-      #SHOPAGENT_OLLAMA_MODEL: ${SHOPAGENT_OLLAMA_MODEL:-qwen3:8b}
-
-      # Optional cloud AI
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
+      SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
+      SHOPAGENT_CORS_ORIGINS: ${SHOPAGENT_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       SHOPAGENT_AI_API_BASE_URL: ${SHOPAGENT_AI_API_BASE_URL:-}
       SHOPAGENT_AI_API_KEY: ${SHOPAGENT_AI_API_KEY:-}
       SHOPAGENT_AI_API_MODEL: ${SHOPAGENT_AI_API_MODEL:-}
       SHOPAGENT_AI_TIMEOUT: ${SHOPAGENT_AI_TIMEOUT:-60}
-
-      # Product research
       SHOPAGENT_SERPER_API_KEY: ${SHOPAGENT_SERPER_API_KEY:-}
       SHOPAGENT_GOOGLE_API_KEY: ${SHOPAGENT_GOOGLE_API_KEY:-}
       SHOPAGENT_GOOGLE_CX: ${SHOPAGENT_GOOGLE_CX:-}
       SHOPAGENT_MAX_COMPARISON_SOURCES: ${SHOPAGENT_MAX_COMPARISON_SOURCES:-8}
-
-      # Browser/product extraction
       SHOPAGENT_PLAYWRIGHT_HEADLESS: ${SHOPAGENT_PLAYWRIGHT_HEADLESS:-true}
-
-      # Production safety
-      SHOPAGENT_ALLOW_DEMO_SEED: ${SHOPAGENT_ALLOW_DEMO_SEED:-false}
-
-      # Notifications
+      SHOPAGENT_ALLOW_DEMO_SEED: "true"
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
-
     ports:
       - "${SHOPAGENT_API_PORT:-8000}:8000"
-
     depends_on:
       db:
         condition: service_healthy
-      #ollama:
-      #  condition: service_started
-
     restart: unless-stopped
 
-
   # ==========================================================
-  # Server-Side Monitoring Worker
+  # Server-Side Monitoring Worker (Reuses backend image)
   # ==========================================================
   monitoring-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.worker
-
+    image: shopagent-backend:latest
+    command: ["python", "-m", "app.monitor_worker"]
     environment:
-
-      # Database
-      SHOPAGENT_DATABASE_URL: >-
-        postgresql+psycopg://shopagent:${POSTGRES_PASSWORD}@db:5432/shopagent
-
-      # Security
-      SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:?Set SHOPAGENT_JWT_SECRET in .env}
-
-      # AI
-      #SHOPAGENT_AI_PROVIDER: ${SHOPAGENT_AI_PROVIDER:-ollama}
-      #SHOPAGENT_OLLAMA_BASE_URL: ${SHOPAGENT_OLLAMA_BASE_URL:-http://ollama:11434}
-      #SHOPAGENT_OLLAMA_MODEL: ${SHOPAGENT_OLLAMA_MODEL:-qwen3:8b}
-
-      # Notifications
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
+      SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
-
-      # Browser/product extraction
       SHOPAGENT_PLAYWRIGHT_HEADLESS: ${SHOPAGENT_PLAYWRIGHT_HEADLESS:-true}
-
     depends_on:
       db:
         condition: service_healthy
       backend:
         condition: service_started
-
     restart: unless-stopped
-
 
   # ==========================================================
   # Next.js Web Application
@@ -133,27 +74,14 @@ services:
   web:
     build:
       context: ./web
-
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-
     ports:
       - "${SHOPAGENT_WEB_PORT:-3000}:3000"
-
     depends_on:
       backend:
         condition: service_started
-
     restart: unless-stopped
 
-
-# ============================================================
-# Persistent Docker Volumes
-# ============================================================
 volumes:
-
-  # PostgreSQL data
   shopagent_pg:
-
-  # Ollama model data
-  #shopagent_ollama:

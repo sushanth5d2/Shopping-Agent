@@ -32,15 +32,36 @@ class JsonLdWebConnector(StoreConnector):
  name='Web Product Connector'
  def observe_url(self,url):
   validate_public_url(url)
-  if not sync_playwright: raise RuntimeError('Playwright is required for live web ingestion')
-  with sync_playwright() as p:
-   browser=p.chromium.launch(headless=settings.playwright_headless)
-   context=browser.new_context(user_agent='ShopAgent/1.0 (+product-research)')
-   page=context.new_page()
-   page.goto(url,wait_until='domcontentloaded',timeout=settings.url_fetch_timeout)
-   page.wait_for_timeout(500)
-   html=page.content(); title=page.title(); browser.close()
+  html = ''
+  title = ''
+  # Fast HTTP fetch attempt first
+  try:
+   import httpx
+   with httpx.Client(timeout=10.0, follow_redirects=True, headers={'User-Agent':'ShopAgent/1.0 (+product-research)'}) as client:
+    r = client.get(url)
+    if r.status_code == 200:
+     html = r.text
+  except Exception:
+   html = ''
+
+  # If fast HTTP failed or returned minimal content, try Playwright if available
+  if (not html or len(html) < 200) and sync_playwright:
+   try:
+    with sync_playwright() as p:
+     browser=p.chromium.launch(headless=settings.playwright_headless)
+     context=browser.new_context(user_agent='ShopAgent/1.0 (+product-research)')
+     page=context.new_page()
+     page.goto(url,wait_until='domcontentloaded',timeout=settings.url_fetch_timeout)
+     page.wait_for_timeout(500)
+     html=page.content(); title=page.title(); browser.close()
+   except Exception:
+    pass
+
+  if not html:
+   raise ValueError('Unable to retrieve product page content')
+
   soup=BeautifulSoup(html,'html.parser'); data=[]
+  title = title or (soup.title.string if soup.title else '')
   for tag in soup.find_all('script',type='application/ld+json'):
    try:
     obj=json.loads(tag.string or tag.text)
@@ -54,6 +75,11 @@ class JsonLdWebConnector(StoreConnector):
   if price is None:
    meta=soup.find('meta',property='product:price:amount') or soup.find('meta',attrs={'itemprop':'price'})
    price=meta.get('content') if meta else None
+  if price is None:
+   # Try finding common price patterns
+   price_match = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)', soup.get_text())
+   if price_match:
+    price = price_match.group(1)
   if price is None: raise ValueError('No reliable product price found on page')
   availability=str(offers.get('availability','')) if isinstance(offers,dict) else ''
   stock=0 if 'outofstock' in availability.lower() else 1
