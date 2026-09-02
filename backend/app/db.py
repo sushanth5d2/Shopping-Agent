@@ -5,6 +5,9 @@ from .config import settings
 
 logger = logging.getLogger('uvicorn')
 
+class Base(DeclarativeBase):
+    pass
+
 def get_candidate_urls():
     env_url = os.getenv('SHOPAGENT_DATABASE_URL') or os.getenv('DATABASE_URL')
     urls = []
@@ -33,17 +36,17 @@ def get_candidate_urls():
             deduped.append(u)
     return deduped
 
-def create_active_engine():
-    urls = get_candidate_urls()
-    return create_engine(urls[0], pool_pre_ping=True, pool_recycle=300)
-
-engine = create_active_engine()
+# Initialize with the first candidate
+_initial_urls = get_candidate_urls()
+engine = create_engine(_initial_urls[0], pool_pre_ping=True, pool_recycle=300)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-class Base(DeclarativeBase):
-    pass
+def get_engine():
+    global engine
+    return engine
 
 def get_db():
+    global SessionLocal
     db = SessionLocal()
     try:
         yield db
@@ -73,4 +76,15 @@ def wait_for_db(max_retries=30, delay=1.0):
         print(f"WARNING: Waiting for PostgreSQL database container (attempt {attempt}/{max_retries})...", flush=True)
         time.sleep(delay)
     
+    return False
+
+def init_db():
+    """Waits for DB connection, binds engine, and creates all relational tables."""
+    global engine, SessionLocal
+    if wait_for_db():
+        from app import models  # Register all models with Base.metadata
+        Base.metadata.create_all(bind=engine)
+        logger.info("All database tables verified and created successfully.")
+        print("INFO: All database tables verified and created successfully.", flush=True)
+        return True
     return False

@@ -19,10 +19,9 @@ from .seed import seed_data, seed_user_defaults
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .db import wait_for_db
-    # Wait for PostgreSQL database readiness
-    if wait_for_db():
-        Base.metadata.create_all(bind=engine)
+    from .db import init_db, SessionLocal
+    from .seed import seed_data
+    if init_db():
         db = SessionLocal()
         try:
             seed_data(db)
