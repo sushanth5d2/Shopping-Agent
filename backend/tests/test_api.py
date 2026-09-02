@@ -6,6 +6,7 @@ from app.db import Base, engine, SessionLocal
 from app import models
 from app.seed import seed_data
 
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 seed_data(db)
@@ -84,4 +85,87 @@ def test_decision_lab_endpoint():
         assert 'second_opinion' in data
         assert 'deal_truth' in data
         assert 'reviews' in data
+
+def test_substitutes_and_sustainability():
+    with TestClient(app) as c:
+        email = 'sub-user@example.com'
+        password = 'password123'
+        r = c.post('/api/auth/register', json={'email': email, 'password': password})
+        if r.status_code == 409:
+            r = c.post('/api/auth/login', json={'email': email, 'password': password})
+        token = r.json()['access_token']
+        headers = {'Authorization': f'Bearer {token}'}
+
+        res = c.get('/api/products/1', headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert 'substitutes' in data
+        assert len(data['substitutes']) >= 1
+        assert 'sustainability' in data
+        assert 'eco_grade' in data['sustainability']
+
+def test_item_voting_and_swapping():
+    with TestClient(app) as c:
+        email = 'vote-user@example.com'
+        password = 'password123'
+        r = c.post('/api/auth/register', json={'email': email, 'password': password})
+        if r.status_code == 409:
+            r = c.post('/api/auth/login', json={'email': email, 'password': password})
+        token = r.json()['access_token']
+        headers = {'Authorization': f'Bearer {token}'}
+
+        # Add item with Gift Mode enabled
+        item_res = c.post('/api/items', headers=headers, json={
+            'name': 'Amul Butter 500g',
+            'quantity': 1,
+            'is_gift': True,
+            'gift_recipient': 'Rahul',
+            'gift_message': 'Happy Birthday!',
+            'gift_wrap': True
+        })
+        assert item_res.status_code == 200
+        item = item_res.json()
+        assert item['is_gift'] is True
+        assert item['gift_recipient'] == 'Rahul'
+
+        # Family member casts vote
+        vote_res = c.post(f"/api/items/{item['id']}/vote", headers=headers, json={
+            'member_name': 'Sarah (Partner)',
+            'vote': 'APPROVE',
+            'comment': 'Good choice for breakfast'
+        })
+        assert vote_res.status_code == 200
+        assert vote_res.json()['approvals_count'] == 1
+
+        # 1-Click swap item
+        swap_res = c.post(f"/api/items/{item['id']}/swap", headers=headers, json={
+            'new_name': 'Mother Dairy Table Butter (500g)'
+        })
+        assert swap_res.status_code == 200
+        assert 'Mother Dairy' in swap_res.json()['name']
+
+def test_invoice_scanning_and_receipt_generation():
+    with TestClient(app) as c:
+        email = 'invoice-user@example.com'
+        password = 'password123'
+        r = c.post('/api/auth/register', json={'email': email, 'password': password})
+        if r.status_code == 409:
+            r = c.post('/api/auth/login', json={'email': email, 'password': password})
+        token = r.json()['access_token']
+        headers = {'Authorization': f'Bearer {token}'}
+
+        # Test Invoice Scanner
+        inv_text = """
+        BLINKIT COMMERCE PRIVATE LIMITED
+        Invoice INV-8829104
+        Tomatoes Fresh 1kg: ₹40.00
+        Amul Butter 500g: ₹58.00
+        Total Amount Paid: ₹98.00
+        """
+        scan_res = c.post('/api/invoices/scan', headers=headers, json={'text': inv_text})
+        assert scan_res.status_code == 200
+        inv_data = scan_res.json()
+        assert inv_data['total'] > 0
+        assert len(inv_data['items']) >= 1
+
 

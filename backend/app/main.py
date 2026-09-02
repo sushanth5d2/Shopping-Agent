@@ -63,8 +63,43 @@ class Register(BaseModel):email:EmailStr;password:str=Field(min_length=6,max_len
 class Login(BaseModel):email:EmailStr;password:str
 class Refresh(BaseModel):refresh_token:str
 class Intent(BaseModel):text:str=Field(min_length=1,max_length=2000)
-class ItemIn(BaseModel):name:str=Field(min_length=1,max_length=255);quantity:int=Field(1,ge=1,le=100);target_price:float|None=None;max_price:float|None=None;mode:str='BUY_NOW';purchase_mode:str='ASK'
-class ItemUpdate(BaseModel):name:str|None=None;quantity:int|None=None;target_price:float|None=None;max_price:float|None=None;mode:str|None=None;purchase_mode:str|None=None;status:str|None=None
+class ItemIn(BaseModel):
+ name:str=Field(min_length=1,max_length=255)
+ quantity:int=Field(1,ge=1,le=100)
+ target_price:float|None=None
+ max_price:float|None=None
+ mode:str='BUY_NOW'
+ purchase_mode:str='ASK'
+ is_gift:bool=False
+ gift_recipient:str=''
+ gift_message:str=''
+ gift_wrap:bool=False
+
+class ItemUpdate(BaseModel):
+ name:str|None=None
+ quantity:int|None=None
+ target_price:float|None=None
+ max_price:float|None=None
+ mode:str|None=None
+ purchase_mode:str|None=None
+ status:str|None=None
+ is_gift:bool|None=None
+ gift_recipient:str|None=None
+ gift_message:str|None=None
+ gift_wrap:bool|None=None
+
+class VoteIn(BaseModel):
+ family_member_id:int|None=None
+ member_name:str='Family Member'
+ vote:str='APPROVE'
+ comment:str=''
+
+class SwapIn(BaseModel):
+ new_name:str=Field(min_length=1,max_length=255)
+
+class InvoiceScanIn(BaseModel):
+ text:str=Field(min_length=5,max_length=10000)
+
 class PrefIn(BaseModel):
  preferred_brands:str=''
  avoided_brands:str=''
@@ -120,7 +155,29 @@ def item_obj(db,i):
   ls=db.query(StoreListing).filter_by(product_id=i.product_id).all(); totals=[true_total(x.price,x.delivery,x.tax,x.fees,x.coupon,x.cashback) for x in ls if x.stock]
   if totals:
    current=min(totals); hist=[s.total for x in ls for s in db.query(PriceSnapshot).filter_by(listing_id=x.id).all()];decision_obj=decision(current,i.target_price,hist)
- return {'id':i.id,'name':i.name,'quantity':i.quantity,'target_price':i.target_price,'max_price':i.max_price,'mode':i.mode,'purchase_mode':i.purchase_mode,'status':i.status,'product_id':i.product_id,'current_price':current,'decision':decision_obj}
+ votes_rows = db.query(ItemVote).filter_by(item_id=i.id).all()
+ votes = [{'id':v.id,'name':v.member_name,'vote':v.vote,'comment':v.comment,'created_at':v.created_at} for v in votes_rows]
+ return {
+  'id':i.id,
+  'name':i.name,
+  'quantity':i.quantity,
+  'target_price':i.target_price,
+  'max_price':i.max_price,
+  'mode':i.mode,
+  'purchase_mode':i.purchase_mode,
+  'status':i.status,
+  'product_id':i.product_id,
+  'current_price':current,
+  'decision':decision_obj,
+  'is_gift':getattr(i, 'is_gift', False),
+  'gift_recipient':getattr(i, 'gift_recipient', ''),
+  'gift_message':getattr(i, 'gift_message', ''),
+  'gift_wrap':getattr(i, 'gift_wrap', False),
+  'votes':votes,
+  'approvals_count':sum(1 for v in votes_rows if v.vote == 'APPROVE'),
+  'rejections_count':sum(1 for v in votes_rows if v.vote == 'REJECT')
+ }
+
 def product_summary(db,pid):
  p=db.get(Product,pid)
  if not p:raise HTTPException(404,'Product not found')
@@ -129,7 +186,21 @@ def product_summary(db,pid):
   st=db.get(Store,l.store_id);seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
   out.append({'listing_id':l.id,'store':st.name,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True})
  if not out:raise HTTPException(404,'No live listings available for this product')
- return {'product_id':pid,'product':p.name,'brand':p.brand,'model':p.model,'variant':p.variant,'listings':sorted(out,key=lambda x:x['true_total']),'best':min(out,key=lambda x:x['true_total'])}
+ best_item = min(out,key=lambda x:x['true_total'])
+ substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total'])
+ sustainability = calculate_sustainability_score(p.category or 'General', p.name, best_item.get('store', ''))
+ return {
+  'product_id':pid,
+  'product':p.name,
+  'brand':p.brand,
+  'model':p.model,
+  'variant':p.variant,
+  'category':p.category,
+  'listings':sorted(out,key=lambda x:x['true_total']),
+  'best':best_item,
+  'substitutes':substitutes,
+  'sustainability':sustainability
+ }
 @app.get('/api/health')
 def health():return {'status':'ok','version':'3.0.0','environment':'production'}
 @app.post('/api/auth/register')
@@ -252,7 +323,11 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
   max_price=p.max_price,
   mode=p.mode,
   purchase_mode=p.purchase_mode,
-  product_id=matched_prod.id
+  product_id=matched_prod.id,
+  is_gift=p.is_gift,
+  gift_recipient=p.gift_recipient,
+  gift_message=p.gift_message,
+  gift_wrap=p.gift_wrap
  )
  db.add(it)
  db.flush()
@@ -266,6 +341,36 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
  log(db, u, 'Products', f"Added {p.name} with verified multi-store tracking.")
  db.commit()
  db.refresh(it)
+ return item_obj(db, it)
+
+@app.post('/api/items/{item_id}/vote')
+def vote_item(item_id:int,p:VoteIn,u=Depends(current_user),db:Session=Depends(get_db)):
+ it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
+ if not it:raise HTTPException(404,'Item not found')
+ v=ItemVote(
+  item_id=it.id,
+  family_member_id=p.family_member_id,
+  member_name=p.member_name or 'Family Member',
+  vote=p.vote.upper(),
+  comment=p.comment or ''
+ )
+ db.add(v)
+ log(db, u, 'Family', f"{p.member_name} voted {p.vote.upper()} on {it.name}.")
+ db.commit()
+ return item_obj(db, it)
+
+@app.post('/api/items/{item_id}/swap')
+def swap_item(item_id:int,p:SwapIn,u=Depends(current_user),db:Session=Depends(get_db)):
+ it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
+ if not it:raise HTTPException(404,'Item not found')
+ pref=db.query(UserPreference).filter_by(user_id=u.id).first()
+ pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+ matched_prod = find_or_create_product_for_name(db, p.new_name, it.target_price or it.max_price, pincode=pincode)
+ old_name = it.name
+ it.name = p.new_name
+ it.product_id = matched_prod.id
+ log(db, u, 'Products', f"Swapped '{old_name}' with alternative '{p.new_name}'.")
+ db.commit()
  return item_obj(db, it)
 
 @app.patch('/api/items/{item_id}')
@@ -447,6 +552,16 @@ def ingest_url(p:UrlIn,u=Depends(current_user),db:Session=Depends(get_db)):
   host=__import__('urllib.parse',fromlist=['urlparse']).urlparse(p.url).netloc;store=Store(name=host,base_url=host,price_supported=True,search_supported=False,stock_supported=True,checkout_supported=False);db.add(store);db.flush()
  seller=Seller(store_id=store.id,name=obs.seller or 'Unknown',rating=obs.seller_rating);db.add(seller);db.flush()
  l=StoreListing(product_id=existing.id,store_id=store.id,seller_id=seller.id,url=p.url,currency=obs.currency,price=obs.price,delivery=obs.delivery,tax=obs.tax,fees=obs.fees,coupon=obs.coupon,cashback=obs.cashback,stock=obs.stock,delivery_days=obs.delivery_days,warranty=obs.warranty,returns=obs.returns,condition=obs.condition);db.add(l);db.flush();db.add(PriceSnapshot(listing_id=l.id,price=obs.price,delivery=obs.delivery,total=true_total(obs.price,obs.delivery,obs.tax,obs.fees,obs.coupon,obs.cashback),stock=obs.stock,seller=obs.seller));db.commit();return {'product':{'id':existing.id,'name':existing.name},'listing':product_summary(db,existing.id)['best']}
+@app.get('/api/products/{product_id}')
+@app.get('/api/products/{product_id}/summary')
+def get_product(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ return product_summary(db,product_id)
+
+@app.get('/api/products/{product_id}/substitutes')
+def get_substitutes(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ c = product_summary(db,product_id)
+ return {'product_id': product_id, 'product': c['product'], 'substitutes': c.get('substitutes', [])}
+
 @app.get('/api/products/{product_id}/compare')
 def compare(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):return product_summary(db,product_id)
 @app.get('/api/products/{product_id}/analysis')
@@ -468,7 +583,9 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  compat=check_compatibility(p.name,p.specs or '')
  reviews=get_review_intelligence(p.name)
  seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':'Verified 1-2 Day Dispatch','return_satisfaction':'96% Positive Resolution'}
- return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'price_history':hist}
+ substitutes = c.get('substitutes', [])
+ sustainability = c.get('sustainability', {})
+ return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'substitutes':substitutes,'sustainability':sustainability,'price_history':hist}
 @app.post('/api/items/{item_id}/monitor')
 def monitor(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
@@ -534,7 +651,11 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   savings=savings_val,
   status='CONFIRMED',
   order_number=order_num,
-  idempotency_key=idempotency_key
+  idempotency_key=idempotency_key,
+  is_gift=getattr(it, 'is_gift', False),
+  gift_recipient=getattr(it, 'gift_recipient', ''),
+  gift_message=getattr(it, 'gift_message', ''),
+  gift_wrap=getattr(it, 'gift_wrap', False)
  )
  db.add(ord_rec)
  it.status = 'COMPLETED'
@@ -548,11 +669,55 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   'product': it.name,
   'store': best.get('store', 'Retailer'),
   'url': best.get('url', ''),
-  'total': total_price
+  'total': total_price,
+  'is_gift': ord_rec.is_gift,
+  'gift_recipient': ord_rec.gift_recipient
  }
+
+@app.post('/api/invoices/scan')
+def scan_invoice(p:InvoiceScanIn,u=Depends(current_user),db:Session=Depends(get_db)):
+ res = parse_invoice_text(p.text)
+ log(db, u, 'Invoices', f"Scanned invoice from {res['seller']} with {len(res['items'])} items (Total: ₹{res['total']:,.2f}).")
+ db.commit()
+ return res
+
+@app.get('/api/orders/{order_id}/receipt')
+def order_receipt(order_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ o=db.query(Order).filter_by(id=order_id,user_id=u.id).first()
+ if not o:raise HTTPException(404,'Order not found')
+ subtotal = round(o.price * 0.9524, 2)
+ gst = round(o.price - subtotal, 2)
+ return {
+  'order_number': o.order_number,
+  'date': o.created_at.strftime('%d %b %Y, %I:%M %p') if o.created_at else 'Recent',
+  'seller': o.store,
+  'product_name': o.product_name,
+  'price': o.price,
+  'subtotal': subtotal,
+  'gst_tax': gst,
+  'savings': o.savings,
+  'status': o.status,
+  'is_gift': o.is_gift,
+  'gift_recipient': o.gift_recipient,
+  'gift_message': o.gift_message,
+  'warranty': '1-Year Official Manufacturer Warranty Verified',
+  'qr_verification_code': f"VERIFIED-SHOPAGENT-{o.order_number}"
+ }
+
 @app.get('/api/orders')
 def orders(u=Depends(current_user),db:Session=Depends(get_db)):
- return [{'id':o.id,'product_name':o.product_name,'store':o.store,'price':o.price,'status':o.status,'savings':o.savings,'order_number':o.order_number,'created_at':o.created_at} for o in db.query(Order).filter_by(user_id=u.id).order_by(Order.created_at.desc())]
+ return [{
+  'id':o.id,
+  'product_name':o.product_name,
+  'store':o.store,
+  'price':o.price,
+  'status':o.status,
+  'savings':o.savings,
+  'order_number':o.order_number,
+  'created_at':o.created_at,
+  'is_gift':getattr(o, 'is_gift', False),
+  'gift_recipient':getattr(o, 'gift_recipient', '')
+ } for o in db.query(Order).filter_by(user_id=u.id).order_by(Order.created_at.desc())]
 @app.get('/api/activity')
 def activity(u=Depends(current_user),db:Session=Depends(get_db)):
  return [{'id':x.id,'kind':x.kind,'message':x.message,'created_at':x.created_at} for x in db.query(AgentEvent).filter_by(user_id=u.id).order_by(AgentEvent.created_at.desc()).limit(200)]

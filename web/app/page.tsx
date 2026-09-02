@@ -6,7 +6,8 @@ import {
   Package, CircleDollarSign, Activity, Settings, LogOut,
   ChevronDown, ExternalLink, ShieldAlert, Zap, Layers3,
   ShoppingCart, AlertTriangle, PlayCircle, Scale, Clock3,
-  Check, Menu, X, Plus, Trash2, Bell
+  Check, Menu, X, Plus, Trash2, Bell, Gift, Users, Leaf,
+  FileText, RefreshCw, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 
 interface Item {
@@ -21,6 +22,13 @@ interface Item {
   product_id?: number | null;
   current_price?: number | null;
   decision?: { decision: string; reason: string } | null;
+  is_gift?: boolean;
+  gift_recipient?: string;
+  gift_message?: string;
+  gift_wrap?: boolean;
+  votes?: Array<{ id: number; name: string; vote: string; comment: string; created_at: string }>;
+  approvals_count?: number;
+  rejections_count?: number;
 }
 
 interface Listing {
@@ -158,6 +166,7 @@ export default function App() {
   const [dark, setDark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [aiStatus, setAiStatus] = useState<any>(null);
+  const [activeReceipt, setActiveReceipt] = useState<any>(null);
   const [preferences, setPreferences] = useState<any>({
     global_max_order: 10000,
     monthly_max: 50000,
@@ -331,20 +340,70 @@ export default function App() {
     }
   };
 
-  const addNewItem = async (name: string, target_price?: number, mode = 'BUY_NOW') => {
+  const addNewItem = async (name: string, target_price?: number, mode = 'BUY_NOW', is_gift = false, gift_recipient = '', gift_message = '', gift_wrap = false) => {
     if (!name.trim()) return;
     setBusy(true);
     try {
       await req('/api/items', {
         method: 'POST',
-        body: JSON.stringify({ name: name.trim(), target_price: target_price || null, mode })
+        body: JSON.stringify({
+          name: name.trim(),
+          target_price: target_price || null,
+          mode,
+          is_gift,
+          gift_recipient,
+          gift_message,
+          gift_wrap
+        })
       });
       await load();
-      setToast(`Added ${name} to shopping plan`);
+      setToast(`Added ${name} ${is_gift ? '🎁 (Gift)' : ''} to shopping plan`);
     } catch (e: any) {
       setToast(e.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const swapItem = async (itemId: number, newName: string) => {
+    setBusy(true);
+    try {
+      const res = await req(`/api/items/${itemId}/swap`, {
+        method: 'POST',
+        body: JSON.stringify({ new_name: newName })
+      });
+      await load();
+      setToast(`Swapped with alternative: '${newName}'`);
+      if (compare && compare.product_id) {
+        const p = await req(`/api/products/${res.product_id}/summary`);
+        setCompare(p);
+      }
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const voteItem = async (itemId: number, memberName: string, vote: 'APPROVE' | 'REJECT', comment = '') => {
+    try {
+      await req(`/api/items/${itemId}/vote`, {
+        method: 'POST',
+        body: JSON.stringify({ member_name: memberName, vote, comment })
+      });
+      await load();
+      setToast(`Vote ${vote === 'APPROVE' ? '👍 Approved' : '👎 Rejected'} recorded`);
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const viewOrderReceipt = async (orderId: number) => {
+    try {
+      const rec = await req(`/api/orders/${orderId}/receipt`);
+      setActiveReceipt(rec);
+    } catch (e: any) {
+      setToast(e.message);
     }
   };
 
@@ -545,19 +604,20 @@ export default function App() {
 
         <div className="content">
           {tab === 'Home' && <Home input={input} setInput={setInput} run={run} busy={busy} stats={stats} todo={todo} activity={activity} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} setTab={setTab} productUrl={productUrl} setProductUrl={setProductUrl} analyzeUrl={analyzeUrl} urlBusy={urlBusy} />}
-          {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} onAddItem={addNewItem} onDeleteItem={deleteItem} onToggleStatus={toggleItemStatus} />}
-          {tab === 'Decision Lab' && <DecisionLabPage items={items} selectedPid={decisionPid} data={decisionData} onSelectProduct={openDecisionLab} />}
+          {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} onAddItem={addNewItem} onDeleteItem={deleteItem} onToggleStatus={toggleItemStatus} onVote={voteItem} />}
+          {tab === 'Decision Lab' && <DecisionLabPage items={items} selectedPid={decisionPid} data={decisionData} onSelectProduct={openDecisionLab} onSwap={swapItem} />}
           {tab === 'Master Cart' && <MasterCartPage data={basketData} strategy={basketStrategy} setStrategy={async (st: string) => { setBasketStrategy(st); setBasketData(await req(`/api/basket?strategy=${st}`)); }} todo={todo} buyItem={buy} onCheckoutAll={async () => { for (const it of todo) { await buy(it.id); } setTab('Orders'); }} />}
-          {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} />}
+          {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} onScanInvoice={async (txt: string) => { const res = await req('/api/invoices/scan', { method: 'POST', body: JSON.stringify({ text: txt }) }); for (const it of res.items) { await addNewItem(it.item, it.price); } setToast(`Imported ${res.items.length} items from scanned invoice!`); }} />}
           {tab === 'Monitoring' && <Monitoring rows={monitor} refresh={load} openDecisionLab={openDecisionLab} onCheck={triggerPriceCheck} onDelete={deleteMonitor} />}
           {tab === 'Deals' && <Deals deals={deals} openDecisionLab={openDecisionLab} buy={buy} />}
-          {tab === 'Orders' && <Orders orders={orders} />}
+          {tab === 'Orders' && <Orders orders={orders} onViewReceipt={viewOrderReceipt} />}
           {tab === 'Savings' && <Savings data={data} orders={orders} />}
           {tab === 'Agent Activity' && <ActivityPage rows={activity} />}
-          {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} />}
+          {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} onSwap={swapItem} />}
           {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} preferences={preferences} savePreferences={savePreferences} busy={busy} signout={signout} />}
         </div>
       </main>
+      {activeReceipt && <ReceiptModal receipt={activeReceipt} onClose={() => setActiveReceipt(null)} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -701,11 +761,16 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
   );
 }
 
-function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus }: any) {
+function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus, onVote }: any) {
   const [filter, setFilter] = useState<'ALL' | 'BUY_NOW' | 'MONITOR' | 'COMPLETED'>('ALL');
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemMode, setNewItemMode] = useState('BUY_NOW');
+  const [showGiftOptions, setShowGiftOptions] = useState(false);
+  const [isGift, setIsGift] = useState(false);
+  const [giftRecipient, setGiftRecipient] = useState('');
+  const [giftMessage, setGiftMessage] = useState('');
+  const [giftWrap, setGiftWrap] = useState(false);
 
   const filteredItems = filter === 'COMPLETED' ? completed : items.filter((x: Item) => {
     if (filter === 'BUY_NOW') return x.mode === 'BUY_NOW';
@@ -716,24 +781,67 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItemName.trim()) return;
-    onAddItem(newItemName, newItemPrice ? Number(newItemPrice) : undefined, newItemMode);
+    onAddItem(
+      newItemName,
+      newItemPrice ? Number(newItemPrice) : undefined,
+      newItemMode,
+      isGift,
+      giftRecipient,
+      giftMessage,
+      giftWrap
+    );
     setNewItemName('');
     setNewItemPrice('');
+    setIsGift(false);
+    setGiftRecipient('');
+    setGiftMessage('');
+    setShowGiftOptions(false);
   };
 
   return (
     <div className="stack">
       <PageTitle eyebrow="SMART SHOPPING LIST" title="To-Buy" meta={`${items.length} active items`} />
 
-      {/* Add New Item Form */}
-      <form className="panel" onSubmit={handleAdd} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input style={{ flex: 2, minWidth: 200, padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} placeholder="Add product or item name..." value={newItemName} onChange={e => setNewItemName(e.target.value)} />
-        <input style={{ flex: 1, minWidth: 120, padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} placeholder="Target price (₹)" type="number" value={newItemPrice} onChange={e => setNewItemPrice(e.target.value)} />
-        <select style={{ padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={newItemMode} onChange={e => setNewItemMode(e.target.value)}>
-          <option value="BUY_NOW">Buy Now</option>
-          <option value="MONITOR">Monitor Price</option>
-        </select>
-        <button type="submit" className="primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={16} /> Add Item</button>
+      {/* Add New Item Form with Gift Mode */}
+      <form className="panel" onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input style={{ flex: 2, minWidth: 200, padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} placeholder="Add product or item name..." value={newItemName} onChange={e => setNewItemName(e.target.value)} />
+          <input style={{ flex: 1, minWidth: 120, padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} placeholder="Target price (₹)" type="number" value={newItemPrice} onChange={e => setNewItemPrice(e.target.value)} />
+          <select style={{ padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={newItemMode} onChange={e => setNewItemMode(e.target.value)}>
+            <option value="BUY_NOW">Buy Now</option>
+            <option value="MONITOR">Monitor Price</option>
+          </select>
+          <button
+            type="button"
+            className={`filter ${isGift ? 'active' : ''}`}
+            onClick={() => { setIsGift(!isGift); setShowGiftOptions(!isGift); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: isGift ? '#f97316' : undefined, color: isGift ? '#fb923c' : undefined }}
+          >
+            <Gift size={14} /> Gift Mode
+          </button>
+          <button type="submit" className="primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={16} /> Add Item</button>
+        </div>
+
+        {showGiftOptions && isGift && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 10, padding: '10px 14px', borderRadius: 6, background: '#1e1b4b', border: '1px dashed #f97316' }}>
+            <input
+              placeholder="Recipient Name (e.g. Rahul / Mom)"
+              value={giftRecipient}
+              onChange={e => setGiftRecipient(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: 6, background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: 13 }}
+            />
+            <input
+              placeholder="Personalized Gift Note (e.g. Happy Birthday!)"
+              value={giftMessage}
+              onChange={e => setGiftMessage(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: 6, background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: 13 }}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#fed7aa', cursor: 'pointer' }}>
+              <input type="checkbox" checked={giftWrap} onChange={e => setGiftWrap(e.target.checked)} />
+              Add Gift Wrap
+            </label>
+          </div>
+        )}
       </form>
 
       <div className="panel">
@@ -749,7 +857,7 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
               <Check size={20} />
             </button>
             <div style={{ flex: 1 }}>
-              <ProductRow item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} />
+              <ProductRow item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} onVote={onVote} />
             </div>
             <button onClick={() => onDeleteItem(i.id)} title="Delete item" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 8 }}>
               <Trash2 size={16} />
@@ -761,7 +869,7 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
   );
 }
 
-function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
+function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: any) {
   const productItems = items.filter((x: any) => x.product_id);
   if (!data) return (
     <div className="stack">
@@ -925,6 +1033,92 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
         </div>
       </div>
 
+      {/* Sustainability & Eco Guardian */}
+      {data.sustainability && (
+        <div className="panel" style={{ borderColor: '#10b981' }}>
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow" style={{ color: '#10b981' }}>ENVIRONMENTAL FOOTPRINT</span>
+              <h3>Sustainability & Eco Guardian</h3>
+            </div>
+            <span className="status green" style={{ fontSize: 13, fontWeight: 700, padding: '4px 10px' }}>
+              GRADE {data.sustainability.eco_grade || 'A+'} ({data.sustainability.eco_points || 90}/100)
+            </span>
+          </div>
+          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: 14 }}>
+            <div className="stat-card">
+              <div>
+                <span>Packaging Standard</span>
+                <b style={{ fontSize: 13, color: '#34d399' }}>{data.sustainability.packaging}</b>
+              </div>
+              <Leaf size={20} color="#10b981" />
+            </div>
+            <div className="stat-card">
+              <div>
+                <span>Carbon Delivery Footprint</span>
+                <b style={{ fontSize: 13, color: '#38bdf8' }}>{data.sustainability.carbon_footprint}</b>
+              </div>
+              <Zap size={20} color="#38bdf8" />
+            </div>
+            <div className="stat-card">
+              <div>
+                <span>Durability & Repairability</span>
+                <b style={{ fontSize: 13, color: '#a78bfa' }}>{data.sustainability.repairability_score}/10 Index</b>
+                <small>{data.sustainability.durability}</small>
+              </div>
+              <Scale size={20} color="#a78bfa" />
+            </div>
+          </div>
+          <ul style={{ paddingLeft: 18, margin: 0, fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+            {(data.sustainability.highlights || []).map((h: string, idx: number) => (
+              <li key={idx} style={{ marginBottom: 4 }}>{h}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Smart Brand Substitutes & Alternative Discovery */}
+      {data.substitutes && data.substitutes.length > 0 && (
+        <div className="panel" style={{ borderColor: '#6366f1' }}>
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow" style={{ color: '#818cf8' }}>SMART ALTERNATIVES & DISCOVERY</span>
+              <h3>Verified Brand Substitutes</h3>
+            </div>
+            <RefreshCw size={18} color="#818cf8" />
+          </div>
+          <p style={{ fontSize: 13, color: '#cbd5e1', margin: '4px 0 14px' }}>
+            AI-discovered alternatives with identical active specifications or greater price-to-performance value:
+          </p>
+          <div className="listing-grid">
+            {data.substitutes.map((sub: any, idx: number) => (
+              <div className="listing-card" key={idx} style={{ borderColor: sub.savings > 0 ? '#10b981' : undefined }}>
+                <div className="listing-head">
+                  <span className="store-label">{sub.brand}</span>
+                  <span className="status purple">{sub.type}</span>
+                </div>
+                <b style={{ display: 'block', fontSize: 14, color: '#fff', margin: '8px 0 4px' }}>{sub.name}</b>
+                <div className="listing-price">₹{Number(sub.price).toLocaleString()}</div>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 10px' }}>{sub.reason}</p>
+                {sub.savings > 0 && (
+                  <div style={{ color: '#22c55e', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                    💰 Save ₹{Number(sub.savings).toLocaleString()} vs current item
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => onSwap && selectedPid && onSwap(selectedPid, sub.name)}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  <RefreshCw size={13} /> 1-Click Swap with this
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <div><span className="eyebrow">LONG-TERM VALUE</span><h3>True Cost of Ownership Projections</h3></div>
@@ -988,21 +1182,43 @@ function MasterCartPage({ data, strategy, setStrategy, todo, onCheckoutAll }: an
   );
 }
 
-function BatchPage({ urls, setUrls, items, setItems, busy, result, process, monitor, setMonitor, target, setTarget }: any) {
+function BatchPage({ urls, setUrls, items, setItems, busy, result, process, monitor, setMonitor, target, setTarget, onScanInvoice }: any) {
+  const [invoiceText, setInvoiceText] = useState('');
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+
+  const handleInvoiceScan = async () => {
+    if (!invoiceText.trim()) return;
+    setInvoiceBusy(true);
+    try {
+      await onScanInvoice(invoiceText);
+      setInvoiceText('');
+    } finally {
+      setInvoiceBusy(false);
+    }
+  };
+
   return (
     <div className="stack">
-      <PageTitle eyebrow="BULK SHOPPING" title="Batch Intake" meta="Multiple URLs + multiple To-Buy items" />
-      <div className="batch-grid">
+      <PageTitle eyebrow="BULK & INVOICE INTELLIGENCE" title="Batch Intake" meta="Multiple URLs + shopping lists + digital tax invoices" />
+      <div className="batch-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
         <div className="panel batch-panel">
-          <div className="panel-head"><div><span className="eyebrow">PRODUCT URLS</span><h3>Compare many products at once</h3></div><Layers3 size={18} /></div>
-          <p className="batch-help">Paste one product URL per line. ShopAgent verifies each page, extracts Product DNA, records a live listing and keeps the original source URL.</p>
-          <textarea className="batch-textarea" value={urls} onChange={e => setUrls(e.target.value)} placeholder={'https://store.example/product-a\nhttps://store.example/product-b\nhttps://store.example/product-c'} />
-          <div className="batch-options"><label><input type="checkbox" checked={monitor} onChange={e => setMonitor(e.target.checked)} /> Monitor every verified URL</label>{monitor && <input className="batch-target" inputMode="decimal" value={target} onChange={e => setTarget(e.target.value)} placeholder="Target price (optional)" />}</div>
+          <div className="panel-head"><div><span className="eyebrow">PRODUCT URLS</span><h3>Compare URLs at once</h3></div><Layers3 size={18} /></div>
+          <p className="batch-help">Paste one product URL per line. ShopAgent verifies each page, extracts Product DNA, and links live stores.</p>
+          <textarea className="batch-textarea" value={urls} onChange={e => setUrls(e.target.value)} placeholder={'https://store.example/product-a\nhttps://store.example/product-b'} />
+          <div className="batch-options"><label><input type="checkbox" checked={monitor} onChange={e => setMonitor(e.target.checked)} /> Monitor verified URLs</label>{monitor && <input className="batch-target" inputMode="decimal" value={target} onChange={e => setTarget(e.target.value)} placeholder="Target price (₹)" />}</div>
         </div>
         <div className="panel batch-panel">
-          <div className="panel-head"><div><span className="eyebrow">TO-BUY LIST</span><h3>Multiple shopping items</h3></div><ListChecks size={18} /></div>
-          <p className="batch-help">Add one shopping need per line. Each becomes an independent To-Buy item and can later be compared, monitored or purchased separately.</p>
-          <textarea className="batch-textarea" value={items} onChange={e => setItems(e.target.value)} placeholder={'Sony WH-1000XM6\nLogitech MX Master 3S\nUSB-C 100W cable\n2 kg basmati rice'} />
+          <div className="panel-head"><div><span className="eyebrow">TO-BUY LIST</span><h3>Multiple items</h3></div><ListChecks size={18} /></div>
+          <p className="batch-help">Add one shopping need per line. Each becomes an independent item that can be compared, monitored, or bought.</p>
+          <textarea className="batch-textarea" value={items} onChange={e => setItems(e.target.value)} placeholder={'Sony WH-1000XM6\nLogitech MX Master 3S\n2 kg basmati rice'} />
+        </div>
+        <div className="panel batch-panel" style={{ borderColor: '#8b5cf6' }}>
+          <div className="panel-head"><div><span className="eyebrow" style={{ color: '#a78bfa' }}>INVOICE INTELLIGENCE</span><h3>Scan Digital Receipt</h3></div><FileText size={18} color="#a78bfa" /></div>
+          <p className="batch-help">Paste raw invoice text, receipt SMS, or email receipt to extract items, prices, GST, and warranties into your plan.</p>
+          <textarea className="batch-textarea" value={invoiceText} onChange={e => setInvoiceText(e.target.value)} placeholder={'BLINKIT COMMERCE\nInvoice INV-882910\nTomatoes 1kg: ₹40\nAmul Butter 500g: ₹58\nTotal: ₹98'} />
+          <button type="button" className="primary" onClick={handleInvoiceScan} disabled={invoiceBusy || !invoiceText.trim()} style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {invoiceBusy ? 'Scanning...' : 'Extract & Import Items'} <Sparkles size={14} />
+          </button>
         </div>
       </div>
       <div className="batch-actions"><button className="primary" onClick={process} disabled={busy}>{busy ? 'Processing batch…' : 'Process everything'} <Zap size={14} /></button><span>Each URL is processed independently; failed sources are reported without creating fake prices.</span></div>
@@ -1081,21 +1297,104 @@ function Deals({ deals, openDecisionLab, buy }: any) {
   );
 }
 
-function Orders({ orders }: any) {
+function Orders({ orders, onViewReceipt }: any) {
   return (
     <div className="stack">
       <PageTitle eyebrow="PURCHASE HISTORY" title="Orders" meta={`${orders.length} orders`} />
       <div className="panel">
-        <div className="table-head"><span>PRODUCT</span><span>STORE</span><span>PRICE</span><span>STATUS</span><span>ORDER NUMBER</span></div>
+        <div className="table-head"><span>PRODUCT</span><span>STORE</span><span>PRICE</span><span>STATUS</span><span>ORDER NUMBER</span><span>RECEIPT</span></div>
         {orders.length ? orders.map((o: any) => (
-          <div className="order-row" key={o.id}>
-            <div className="monitor-product"><div className="product-thumb">{o.product_name.slice(0, 2).toUpperCase()}</div><div><b>{o.product_name}</b><small>{new Date(o.created_at).toLocaleString()}</small></div></div>
+          <div className="order-row" key={o.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1.5fr 1fr', alignItems: 'center' }}>
+            <div className="monitor-product">
+              <div className="product-thumb">{o.product_name.slice(0, 2).toUpperCase()}</div>
+              <div>
+                <b>{o.product_name}</b>
+                <small>{new Date(o.created_at).toLocaleString()}</small>
+                {o.is_gift && (
+                  <span className="status orange" style={{ fontSize: 10, padding: '1px 5px', display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
+                    <Gift size={10} /> Gift {o.gift_recipient ? `to ${o.gift_recipient}` : ''}
+                  </span>
+                )}
+              </div>
+            </div>
             <span>{o.store}</span>
             <strong>₹{Number(o.price).toLocaleString()}</strong>
             <span className="status green">{o.status}</span>
             <code>{o.order_number}</code>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onViewReceipt && onViewReceipt(o.id)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', fontSize: 12 }}
+            >
+              <FileText size={13} /> Tax Invoice
+            </button>
           </div>
         )) : <Empty icon={Package} text="No confirmed orders yet." />}
+      </div>
+    </div>
+  );
+}
+
+function ReceiptModal({ receipt, onClose }: any) {
+  if (!receipt) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+      <div className="panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: 16, marginBottom: 16 }}>
+          <div>
+            <span className="eyebrow" style={{ color: '#22c55e' }}>VERIFIED DIGITAL TAX RECEIPT</span>
+            <h2 style={{ fontSize: 20, margin: '4px 0', color: '#fff' }}>Official Purchase Invoice</h2>
+            <small style={{ color: '#94a3b8' }}>Order Ref: {receipt.order_number} • Date: {receipt.date}</small>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}><X size={20} /></button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16, fontSize: 13, background: '#1e293b', padding: 14, borderRadius: 8 }}>
+          <div>
+            <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>SELLER / PLATFORM</span>
+            <b style={{ color: '#fff' }}>{receipt.seller}</b>
+          </div>
+          <div>
+            <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>WARRANTY COVERAGE</span>
+            <b style={{ color: '#38bdf8' }}>{receipt.warranty}</b>
+          </div>
+          {receipt.is_gift && (
+            <div style={{ gridColumn: 'span 2', borderTop: '1px dashed #475569', paddingTop: 8, marginTop: 4 }}>
+              <span style={{ color: '#fed7aa', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                <Gift size={13} /> Gifting Order for {receipt.gift_recipient || 'Special Someone'}
+              </span>
+              {receipt.gift_message && <p style={{ fontSize: 12, color: '#fde68a', margin: '2px 0 0', fontStyle: 'italic' }}>"{receipt.gift_message}"</p>}
+            </div>
+          )}
+        </div>
+
+        <div style={{ border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr', background: '#1e293b', padding: '8px 12px', fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
+            <span>ITEM DESCRIPTION</span>
+            <span>GST (5%)</span>
+            <span style={{ textAlign: 'right' }}>AMOUNT</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr', padding: '12px', fontSize: 13, color: '#fff', borderTop: '1px solid #334155', alignItems: 'center' }}>
+            <span>{receipt.product_name}</span>
+            <span style={{ color: '#94a3b8' }}>₹{Number(receipt.gst_tax || 0).toLocaleString()}</span>
+            <strong style={{ textAlign: 'right' }}>₹{Number(receipt.price || 0).toLocaleString()}</strong>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#064e3b', borderRadius: 8, marginBottom: 16 }}>
+          <span style={{ color: '#a7f3d0', fontSize: 13 }}>Verified Savings vs Offline/List Price:</span>
+          <strong style={{ color: '#34d399', fontSize: 15 }}>₹{Number(receipt.savings || 0).toLocaleString()}</strong>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1e293b', paddingTop: 16 }}>
+          <div style={{ fontSize: 11, color: '#64748b' }}>
+            Security ID: <code>{receipt.qr_verification_code}</code>
+          </div>
+          <button className="primary" onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+            <FileText size={14} /> Print / Save PDF
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1161,7 +1460,7 @@ function ActivityPage({ rows }: any) {
   );
 }
 
-function Compare({ data, back, openDecisionLab }: any) {
+function Compare({ data, back, openDecisionLab, onSwap }: any) {
   return (
     <div className="stack">
       <button className="back-btn" onClick={back}>← Back to To-Buy</button>
@@ -1172,6 +1471,16 @@ function Compare({ data, back, openDecisionLab }: any) {
             <div><b>{data.decision?.decision}</b><span>{data.decision?.reason}</span></div>
             <button className="primary" onClick={() => openDecisionLab(data.product_id)}>Open in Decision Lab <Sparkles size={13} /></button>
           </div>
+
+          {/* Eco Grade & Sustainability Quick Pill */}
+          {data.sustainability && (
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 16px', background: '#064e3b', borderRadius: 8, border: '1px solid #059669', color: '#a7f3d0', fontSize: 13, flexWrap: 'wrap' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}><Leaf size={16} /> Eco Grade {data.sustainability.eco_grade} ({data.sustainability.eco_points}/100)</span>
+              <span>• Packaging: {data.sustainability.packaging}</span>
+              <span>• Carbon Delivery: {data.sustainability.carbon_footprint}</span>
+            </div>
+          )}
+
           <div className="listing-grid">
             {(data.listings || []).map((l: Listing, i: number) => (
               <div className={`listing-card ${i === 0 ? 'best' : ''}`} key={l.listing_id || l.store}>
@@ -1191,6 +1500,40 @@ function Compare({ data, back, openDecisionLab }: any) {
               </div>
             ))}
           </div>
+
+          {/* Smart Brand Substitutes */}
+          {data.substitutes && data.substitutes.length > 0 && (
+            <div className="panel" style={{ borderColor: '#6366f1', marginTop: 12 }}>
+              <div className="panel-head">
+                <div>
+                  <span className="eyebrow" style={{ color: '#818cf8' }}>SMART BRAND SUBSTITUTES</span>
+                  <h3>Alternative Product Recommendations</h3>
+                </div>
+                <RefreshCw size={18} color="#818cf8" />
+              </div>
+              <div className="listing-grid">
+                {data.substitutes.map((sub: any, idx: number) => (
+                  <div className="listing-card" key={idx}>
+                    <div className="listing-head">
+                      <span className="store-label">{sub.brand}</span>
+                      <span className="status purple">{sub.type}</span>
+                    </div>
+                    <b style={{ display: 'block', fontSize: 13, color: '#fff', margin: '8px 0 4px' }}>{sub.name}</b>
+                    <div className="listing-price">₹{Number(sub.price).toLocaleString()}</div>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 10px' }}>{sub.reason}</p>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => onSwap && data.product_id && onSwap(data.product_id, sub.name)}
+                      style={{ width: '100%', padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                    >
+                      <RefreshCw size={12} /> Swap with this alternative
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       ) : <Empty text="Select a product to compare." />}
     </div>
@@ -1540,7 +1883,7 @@ function SettingToggle({ title, text, value, onChange }: any) {
   );
 }
 
-function ProductRow({ item, compare, openDecisionLab, buy, monitor }: any) {
+function ProductRow({ item, compare, openDecisionLab, buy, monitor, onVote }: any) {
   return (
     <div className="product-row">
       <div className="product-thumb large">{item.name.slice(0, 2).toUpperCase()}</div>
@@ -1548,11 +1891,36 @@ function ProductRow({ item, compare, openDecisionLab, buy, monitor }: any) {
         <div className="product-title">
           <b>{item.name}</b>
           <span className={`status ${item.mode === 'MONITOR' ? 'purple' : 'blue'}`}>{item.mode === 'MONITOR' ? 'MONITOR' : 'BUY NOW'}</span>
+          {item.is_gift && (
+            <span className="status orange" style={{ background: '#7c2d12', color: '#fed7aa', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Gift size={12} /> Gift {item.gift_recipient ? `for ${item.gift_recipient}` : ''}
+            </span>
+          )}
         </div>
         <div className="product-meta">
           <span>Current <b>{item.current_price ? `₹${item.current_price.toLocaleString()}` : 'No live price'}</b></span>
           {item.target_price && <span>Target <b>₹{item.target_price.toLocaleString()}</b></span>}
           {item.decision?.decision && <span className="decision-mini">{item.decision.decision}</span>}
+          
+          {/* Family Consensus & Voting */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+            <button
+              type="button"
+              onClick={() => onVote && onVote(item.id, 'Self', 'APPROVE')}
+              title="Approve item (Family Vote)"
+              style={{ background: '#064e3b', border: '1px solid #059669', color: '#34d399', borderRadius: 4, padding: '2px 6px', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
+            >
+              <ThumbsUp size={11} /> {item.approvals_count || 0}
+            </button>
+            <button
+              type="button"
+              onClick={() => onVote && onVote(item.id, 'Self', 'REJECT')}
+              title="Reject item (Family Vote)"
+              style={{ background: '#7f1d1d', border: '1px solid #dc2626', color: '#fca5a5', borderRadius: 4, padding: '2px 6px', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
+            >
+              <ThumbsDown size={11} /> {item.rejections_count || 0}
+            </button>
+          </div>
         </div>
       </div>
       <div className="row-actions">

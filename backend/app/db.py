@@ -99,9 +99,27 @@ def auto_migrate_schema(eng):
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS observed_price FLOAT;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS savings FLOAT DEFAULT 0;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100);",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_gift BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_recipient VARCHAR(120) DEFAULT '';",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_message TEXT DEFAULT '';",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_wrap BOOLEAN DEFAULT FALSE;",
         # shopping_items columns
         "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS product_id INTEGER;",
-        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;"
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;",
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS is_gift BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS gift_recipient VARCHAR(120) DEFAULT '';",
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS gift_message TEXT DEFAULT '';",
+        "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS gift_wrap BOOLEAN DEFAULT FALSE;",
+        # item_votes table
+        """CREATE TABLE IF NOT EXISTS item_votes (
+            id SERIAL PRIMARY KEY,
+            item_id INTEGER REFERENCES shopping_items(id) ON DELETE CASCADE,
+            family_member_id INTEGER REFERENCES family_members(id) ON DELETE SET NULL,
+            member_name VARCHAR(120) DEFAULT 'Family Member',
+            vote VARCHAR(20) NOT NULL,
+            comment VARCHAR(255) DEFAULT '',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );"""
     ]
     with eng.connect() as conn:
         for stmt in migrations:
