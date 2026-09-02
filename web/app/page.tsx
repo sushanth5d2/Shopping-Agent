@@ -1,45 +1,57 @@
 'use client';
 
-// ShopAgent - Personal AI Shopping Assistant
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Activity, Bell, Bot, Check, ChevronDown, CircleDollarSign, Clock3, ExternalLink,
-  LayoutDashboard, ListChecks, LogOut, Menu, Package, Search, Settings, Sparkles,
-  Target, TrendingDown, X, Zap, Link2, Layers3, ShoppingCart, ShieldAlert,
-  HelpCircle, ThumbsUp, AlertTriangle, PlayCircle, Scale
+  Sparkles, Bot, Search, ListChecks, Target, TrendingDown,
+  Package, CircleDollarSign, Activity, Settings, LogOut,
+  ChevronDown, ExternalLink, ShieldAlert, Zap, Layers3,
+  ShoppingCart, AlertTriangle, PlayCircle, Scale, Clock3,
+  Check, Menu, X, Plus, Trash2, Bell
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || '';
+interface Item {
+  id: number;
+  name: string;
+  quantity: number;
+  target_price?: number | null;
+  max_price?: number | null;
+  mode: string;
+  purchase_mode: string;
+  status: string;
+  product_id?: number | null;
+  current_price?: number | null;
+  decision?: { decision: string; reason: string } | null;
+}
 
-type Item = {
-  id: number; name: string; quantity: number; target_price: number | null; max_price: number | null;
-  mode: string; purchase_mode: string; status: string; product_id: number | null;
-  current_price: number | null; decision: any;
-};
-
-type Listing = {
+interface Listing {
   listing_id?: number;
   store: string;
-  true_total: number;
   price: number;
   delivery: number;
+  tax?: number;
+  fees?: number;
+  discounts?: number;
+  cashback?: number;
+  true_total: number;
   seller: string;
   seller_rating: number;
   warranty?: string;
   returns?: string;
-  url?: string;
   match_score?: number;
-};
+  url?: string;
+}
+
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 async function req(path: string, opt: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('sa_access') : null;
   let r: Response;
   try {
-    r = await fetch(API + path, {
+    r = await fetch(`${API}${path}`, {
       ...opt,
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opt.headers || {}) }
     });
-  } catch (netErr: any) {
+  } catch {
     throw new Error('Unable to connect to server. Please check if the backend is running.');
   }
   if (!r.ok) {
@@ -60,7 +72,7 @@ async function req(path: string, opt: RequestInit = {}) {
 }
 
 const nav = [
-  ['Home', LayoutDashboard],
+  ['Home', Search],
   ['To-Buy', ListChecks],
   ['Decision Lab', Sparkles],
   ['Master Cart', ShoppingCart],
@@ -104,23 +116,35 @@ export default function App() {
   const [dark, setDark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [aiStatus, setAiStatus] = useState<any>(null);
+  const [preferences, setPreferences] = useState<any>({
+    global_max_order: 10000,
+    monthly_max: 50000,
+    min_seller_rating: 4.0,
+    emergency_stop: false,
+    telegram_bot_token: '',
+    telegram_chat_id: ''
+  });
 
   const load = async () => {
     try {
       const [d, i, m, o, a, de] = await Promise.all([
-        req('/api/dashboard'), req('/api/items'), req('/api/monitoring'), req('/api/orders'), req('/api/activity'), req('/api/deals')
+        req('/api/dashboard'),
+        req('/api/items'),
+        req('/api/monitoring'),
+        req('/api/orders'),
+        req('/api/activity'),
+        req('/api/deals')
       ]);
       setData(d);
       setItems(i.items || []);
-      setMonitor(m.items || []);
+      setMonitor(m.tasks || []);
       setOrders(o || []);
       setActivity(a || []);
       setDeals(de.deals || []);
-      setAuthed(true);
       try { setAiStatus(await req('/api/ai/status')); } catch {}
       try { setBasketData(await req('/api/basket')); } catch {}
+      try { setPreferences(await req('/api/preferences')); } catch {}
 
-      // Load initial decision lab if items exist
       if (i.items && i.items.length > 0 && i.items[0].product_id) {
         setDecisionPid(i.items[0].product_id);
         const dLab = await req(`/api/products/${i.items[0].product_id}/decision-lab`).catch(() => null);
@@ -246,6 +270,47 @@ export default function App() {
     }
   };
 
+  const addNewItem = async (name: string, target_price?: number, mode = 'BUY_NOW') => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await req('/api/items', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), target_price: target_price || null, mode })
+      });
+      await load();
+      setToast(`Added ${name} to shopping plan`);
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteItem = async (id: number) => {
+    try {
+      await req(`/api/items/${id}`, { method: 'DELETE' });
+      await load();
+      setToast('Item removed');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const toggleItemStatus = async (item: Item) => {
+    try {
+      const newStatus = item.status === 'COMPLETED' ? 'TODO' : 'COMPLETED';
+      await req(`/api/items/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus })
+      });
+      await load();
+      setToast(`Item marked ${newStatus}`);
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
   const buy = async (id: number) => {
     setBusy(true);
     try {
@@ -253,7 +318,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Idempotency-Key': crypto.randomUUID() }
       });
-      setToast(x.message || 'Checkout completed');
+      setToast(x.message || 'Order confirmed!');
       await load();
     } catch (e: any) {
       setToast(e.message);
@@ -266,7 +331,27 @@ export default function App() {
     try {
       await req(`/api/items/${id}/monitor`, { method: 'POST' });
       await load();
-      setToast('Monitoring started');
+      setToast('Monitoring active for this product');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const deleteMonitor = async (id: number) => {
+    try {
+      await req(`/api/items/${id}/monitor`, { method: 'DELETE' });
+      await load();
+      setToast('Price monitor removed');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const triggerPriceCheck = async (id: number) => {
+    try {
+      const res = await req(`/api/monitoring/${id}/check`, { method: 'POST' });
+      await load();
+      setToast(`Live price checked: ₹${Number(res.current_price || 0).toLocaleString()}`);
     } catch (e: any) {
       setToast(e.message);
     }
@@ -279,38 +364,70 @@ export default function App() {
       setDecisionData(lab);
       setTab('Decision Lab');
     } catch (e: any) {
-      setToast(e.message || 'Failed to load Decision Lab');
+      setToast(e.message);
     }
   };
 
-  const compareItem = async (i: Item) => {
-    if (!i.product_id) {
-      setToast('No matched product DNA yet. Add a supported product URL or clearer product name.');
+  const compareItem = async (item: Item) => {
+    if (!item.product_id) {
+      setToast('No linked product catalogue entry yet.');
       return;
     }
     try {
-      setCompare(await req(`/api/products/${i.product_id}/compare`));
+      const p = await req(`/api/products/${item.product_id}/summary`);
+      setCompare(p);
       setTab('Compare');
     } catch (e: any) {
       setToast(e.message);
     }
   };
 
+  const savePreferences = async (newPrefs: any) => {
+    setBusy(true);
+    try {
+      await req('/api/preferences', {
+        method: 'PUT',
+        body: JSON.stringify(newPrefs)
+      });
+      setPreferences(newPrefs);
+      setToast('Preferences saved securely');
+      await load();
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const signout = () => {
-    localStorage.clear();
+    localStorage.removeItem('sa_access');
+    localStorage.removeItem('sa_refresh');
     setAuthed(false);
-    setCompare(null);
     setTab('Home');
   };
 
-  if (!authed) return <Auth mode={mode} setMode={setMode} email={email} setEmail={setEmail} password={password} setPassword={setPassword} auth={auth} busy={busy} toast={toast} />;
+  if (!authed) {
+    return (
+      <Auth
+        mode={mode}
+        setMode={setMode}
+        email={email}
+        setEmail={setEmail}
+        password={password}
+        setPassword={setPassword}
+        auth={auth}
+        busy={busy}
+        toast={toast}
+      />
+    );
+  }
 
   const todo = items.filter(x => x.status === 'TODO');
   const completed = items.filter(x => x.status === 'COMPLETED');
   const title = tab === 'Home' ? 'Good morning' : tab;
   const stats = [
     ['To-Buy', todo.length, ListChecks, 'neutral'],
-    ['Monitoring', data?.stats?.monitored || 0, Target, 'purple'],
+    ['Monitoring', data?.stats?.monitored || monitor.length, Target, 'purple'],
     ['Verified savings', `₹${Number(data?.stats?.verified_savings || 0).toLocaleString()}`, CircleDollarSign, 'green'],
     ['Orders', orders.length, Package, 'orange']
   ];
@@ -352,7 +469,7 @@ export default function App() {
             </div>
             <div className="top-actions">
               <div className="global-search"><Search size={16} /><input placeholder="Search products, orders, intelligence…" /><kbd>⌘K</kbd></div>
-              <button className="round" title="Notifications"><Bell size={17} /><i /></button>
+              <button className="round" title="Notifications" onClick={() => setTab('Agent Activity')}><Bell size={17} /><i /></button>
               <button className="profile" onClick={() => setTab('Settings')}>
                 <span>SA</span>
                 <div><b>Account</b><small>Verified Pro</small></div>
@@ -364,17 +481,17 @@ export default function App() {
 
         <div className="content">
           {tab === 'Home' && <Home input={input} setInput={setInput} run={run} busy={busy} stats={stats} todo={todo} activity={activity} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} setTab={setTab} productUrl={productUrl} setProductUrl={setProductUrl} analyzeUrl={analyzeUrl} urlBusy={urlBusy} />}
-          {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} />}
+          {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} onAddItem={addNewItem} onDeleteItem={deleteItem} onToggleStatus={toggleItemStatus} />}
           {tab === 'Decision Lab' && <DecisionLabPage items={items} selectedPid={decisionPid} data={decisionData} onSelectProduct={openDecisionLab} />}
-          {tab === 'Master Cart' && <MasterCartPage data={basketData} strategy={basketStrategy} setStrategy={async (st: string) => { setBasketStrategy(st); setBasketData(await req(`/api/basket?strategy=${st}`)); }} todo={todo} />}
+          {tab === 'Master Cart' && <MasterCartPage data={basketData} strategy={basketStrategy} setStrategy={async (st: string) => { setBasketStrategy(st); setBasketData(await req(`/api/basket?strategy=${st}`)); }} todo={todo} buyItem={buy} onCheckoutAll={async () => { for (const it of todo) { await buy(it.id); } setTab('Orders'); }} />}
           {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} />}
-          {tab === 'Monitoring' && <Monitoring rows={monitor} refresh={load} openDecisionLab={openDecisionLab} />}
-          {tab === 'Deals' && <Deals deals={deals} openDecisionLab={openDecisionLab} />}
+          {tab === 'Monitoring' && <Monitoring rows={monitor} refresh={load} openDecisionLab={openDecisionLab} onCheck={triggerPriceCheck} onDelete={deleteMonitor} />}
+          {tab === 'Deals' && <Deals deals={deals} openDecisionLab={openDecisionLab} buy={buy} />}
           {tab === 'Orders' && <Orders orders={orders} />}
-          {tab === 'Savings' && <Savings data={data} />}
+          {tab === 'Savings' && <Savings data={data} orders={orders} />}
           {tab === 'Agent Activity' && <ActivityPage rows={activity} />}
           {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} />}
-          {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} />}
+          {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} preferences={preferences} savePreferences={savePreferences} busy={busy} />}
         </div>
       </main>
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
@@ -390,13 +507,17 @@ function Auth({ mode, setMode, email, setEmail, password, setPassword, auth, bus
           <span className="brand-mark"><Sparkles size={18} /></span>
           <div><b>ShopAgent</b><small>Personal AI Shopping Assistant</small></div>
         </div>
-        <span className="eyebrow">PRIVATE SHOPPING COMMAND CENTER</span>
-        <h1>{mode === 'login' ? 'Welcome back.' : 'Create your account.'}</h1>
+        <span className="auth-eyebrow">PRIVATE SHOPPING COMMAND CENTER</span>
+        <h2>{mode === 'login' ? 'Sign in to ShopAgent.' : 'Create your account.'}</h2>
         <p>One unified place to search, verify, compare, monitor, and control your shopping without markups or fake deals.</p>
-        <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" /></label>
-        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Minimum 6 characters" /></label>
-        <button className="primary wide" onClick={auth} disabled={busy}>{busy ? 'Authenticating…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
-        <button className="switch" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>{mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Sign in'}</button>
+        <div className="auth-inputs">
+          <div><label>Email</label><input type="email" placeholder="you@domain.com" value={email} onChange={e => setEmail(e.target.value)} /></div>
+          <div><label>Password</label><input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && auth()} /></div>
+          <button className="primary auth-submit" onClick={auth} disabled={busy}>{busy ? 'Processing…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
+          <div className="auth-switch">
+            {mode === 'login' ? <>New to ShopAgent? <button onClick={() => setMode('register')}>Create account</button></> : <>Already have an account? <button onClick={() => setMode('login')}>Sign in</button></>}
+          </div>
+        </div>
         {toast && <div className="auth-error">{toast}</div>}
       </div>
     </div>
@@ -486,35 +607,61 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
   );
 }
 
-function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMonitor }: any) {
+function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus }: any) {
+  const [filter, setFilter] = useState<'ALL' | 'BUY_NOW' | 'MONITOR' | 'COMPLETED'>('ALL');
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemPrice, setNewItemPrice] = useState('');
+  const [newItemMode, setNewItemMode] = useState('BUY_NOW');
+
+  const filteredItems = filter === 'COMPLETED' ? completed : items.filter((x: Item) => {
+    if (filter === 'BUY_NOW') return x.mode === 'BUY_NOW';
+    if (filter === 'MONITOR') return x.mode === 'MONITOR';
+    return true;
+  });
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemName.trim()) return;
+    onAddItem(newItemName, newItemPrice ? Number(newItemPrice) : undefined, newItemMode);
+    setNewItemName('');
+    setNewItemPrice('');
+  };
+
   return (
     <div className="stack">
       <PageTitle eyebrow="SMART SHOPPING LIST" title="To-Buy" meta={`${items.length} active items`} />
-      <div className="panel">
-        <div className="filterbar">
-          <button className="filter active">All <span>{items.length}</span></button>
-          <button className="filter">Buy Now</button>
-          <button className="filter">Monitor</button>
-          <button className="filter">Compare</button>
-          <button className="filter sort">Sort: Priority <ChevronDown size={14} /></button>
-        </div>
-        {items.length ? items.map((i: Item) => (
-          <ProductRow key={i.id} item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} />
-        )) : <Empty icon={ListChecks} text="No active items." />}
-      </div>
+
+      {/* Add New Item Form */}
+      <form className="panel" onSubmit={handleAdd} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input style={{ flex: 2, minWidth: 200, padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} placeholder="Add product or item name..." value={newItemName} onChange={e => setNewItemName(e.target.value)} />
+        <input style={{ flex: 1, minWidth: 120, padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} placeholder="Target price (₹)" type="number" value={newItemPrice} onChange={e => setNewItemPrice(e.target.value)} />
+        <select style={{ padding: '10px 14px', borderRadius: 8, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={newItemMode} onChange={e => setNewItemMode(e.target.value)}>
+          <option value="BUY_NOW">Buy Now</option>
+          <option value="MONITOR">Monitor Price</option>
+        </select>
+        <button type="submit" className="primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={16} /> Add Item</button>
+      </form>
 
       <div className="panel">
-        <div className="panel-head">
-          <div><span className="eyebrow">PURCHASE HISTORY</span><h3>Completed</h3></div>
-          <span className="count-pill">{completed.length}</span>
+        <div className="filterbar">
+          <button className={`filter ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>All <span>{items.length}</span></button>
+          <button className={`filter ${filter === 'BUY_NOW' ? 'active' : ''}`} onClick={() => setFilter('BUY_NOW')}>Buy Now <span>{items.filter((x: any) => x.mode === 'BUY_NOW').length}</span></button>
+          <button className={`filter ${filter === 'MONITOR' ? 'active' : ''}`} onClick={() => setFilter('MONITOR')}>Monitor <span>{items.filter((x: any) => x.mode === 'MONITOR').length}</span></button>
+          <button className={`filter ${filter === 'COMPLETED' ? 'active' : ''}`} onClick={() => setFilter('COMPLETED')}>Completed <span>{completed.length}</span></button>
         </div>
-        {completed.length ? completed.map((i: Item) => (
-          <div className="completed-row" key={i.id}>
-            <span className="done"><Check size={14} /></span>
-            <div><b>{i.name}</b><small>Verified complete purchase</small></div>
-            <strong>{i.current_price ? `₹${i.current_price.toLocaleString()}` : '—'}</strong>
+        {filteredItems.length ? filteredItems.map((i: Item) => (
+          <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => onToggleStatus(i)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: i.status === 'COMPLETED' ? '#22c55e' : '#64748b' }}>
+              <Check size={20} />
+            </button>
+            <div style={{ flex: 1 }}>
+              <ProductRow item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} />
+            </div>
+            <button onClick={() => onDeleteItem(i.id)} title="Delete item" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 8 }}>
+              <Trash2 size={16} />
+            </button>
           </div>
-        )) : <Empty text="No completed purchases yet." />}
+        )) : <Empty icon={ListChecks} text={`No items under ${filter} filter.`} />}
       </div>
     </div>
   );
@@ -536,7 +683,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
   const whyNot = data.why_not_buy || [];
   const dealTruth = data.deal_truth || {};
   const ownership = data.ownership_cost || {};
-  const compat = data.compatibility || {};
   const reviews = data.reviews || {};
 
   return (
@@ -555,7 +701,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
         )}
       </div>
 
-      {/* Top Banner: Verdict + ShopAgent Score + Regret Shield */}
       <div className="dashboard-grid">
         <div className="panel">
           <div className="panel-head">
@@ -587,7 +732,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
           </div>
         </div>
 
-        {/* Second Opinion (Skeptic Agent) */}
         <div className="panel" style={{ borderColor: '#473b75' }}>
           <div className="panel-head">
             <div><span className="eyebrow">SECOND OPINION</span><h3>Skeptic Agent</h3></div>
@@ -602,7 +746,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
         </div>
       </div>
 
-      {/* Buy vs Wait Simulator */}
       <div className="panel">
         <div className="panel-head">
           <div><span className="eyebrow">PRICE TRAJECTORY SIMULATION</span><h3>Buy vs Wait Simulator</h3></div>
@@ -628,7 +771,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
         </div>
       </div>
 
-      {/* Deal Truth & Why NOT Buy Grid */}
       <div className="dashboard-grid">
         <div className="panel">
           <div className="panel-head">
@@ -656,7 +798,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
         </div>
       </div>
 
-      {/* Review Truth & YouTube Reviews */}
       <div className="panel">
         <div className="panel-head">
           <div><span className="eyebrow">SOURCE PROVENANCE</span><h3>Review Truth & YouTube Intelligence</h3></div>
@@ -690,7 +831,6 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
         </div>
       </div>
 
-      {/* True Cost of Ownership Projections */}
       <div className="panel">
         <div className="panel-head">
           <div><span className="eyebrow">LONG-TERM VALUE</span><h3>True Cost of Ownership Projections</h3></div>
@@ -712,7 +852,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct }: any) {
   );
 }
 
-function MasterCartPage({ data, strategy, setStrategy, todo }: any) {
+function MasterCartPage({ data, strategy, setStrategy, todo, onCheckoutAll }: any) {
   const stores = data?.stores || {};
   const total = Number(data?.total || 0);
   const savings = Number(data?.savings || 0);
@@ -746,7 +886,7 @@ function MasterCartPage({ data, strategy, setStrategy, todo }: any) {
               <b style={{ fontSize: 32, color: '#fff' }}>₹{total.toLocaleString()}</b>
               <small style={{ color: '#22c55e', fontSize: 13 }}>Saved ₹{savings.toLocaleString()} vs single store</small>
             </div>
-            <button className="primary wide">Proceed to Checkout Handoff <Zap size={14} /></button>
+            <button className="primary wide" onClick={onCheckoutAll}>Proceed to Checkout Handoff <Zap size={14} /></button>
           </div>
         </div>
       </div>
@@ -760,7 +900,7 @@ function BatchPage({ urls, setUrls, items, setItems, busy, result, process, moni
       <PageTitle eyebrow="BULK SHOPPING" title="Batch Intake" meta="Multiple URLs + multiple To-Buy items" />
       <div className="batch-grid">
         <div className="panel batch-panel">
-          <div className="panel-head"><div><span className="eyebrow">PRODUCT URLS</span><h3>Compare many products at once</h3></div><Link2 size={18} /></div>
+          <div className="panel-head"><div><span className="eyebrow">PRODUCT URLS</span><h3>Compare many products at once</h3></div><Layers3 size={18} /></div>
           <p className="batch-help">Paste one product URL per line. ShopAgent verifies each page, extracts Product DNA, records a live listing and keeps the original source URL.</p>
           <textarea className="batch-textarea" value={urls} onChange={e => setUrls(e.target.value)} placeholder={'https://store.example/product-a\nhttps://store.example/product-b\nhttps://store.example/product-c'} />
           <div className="batch-options"><label><input type="checkbox" checked={monitor} onChange={e => setMonitor(e.target.checked)} /> Monitor every verified URL</label>{monitor && <input className="batch-target" inputMode="decimal" value={target} onChange={e => setTarget(e.target.value)} placeholder="Target price (optional)" />}</div>
@@ -777,18 +917,30 @@ function BatchPage({ urls, setUrls, items, setItems, busy, result, process, moni
   );
 }
 
-function Monitoring({ rows, refresh, openDecisionLab }: any) {
+function Monitoring({ rows, refresh, openDecisionLab, onCheck, onDelete }: any) {
+  const [filter, setFilter] = useState('ALL');
+
+  const filtered = rows.filter((r: any) => {
+    if (filter === 'TARGET_REACHED') return r.status === 'TARGET_REACHED';
+    if (filter === 'WATCHING') return r.status === 'WATCHING';
+    return true;
+  });
+
   return (
     <div className="stack">
       <PageTitle eyebrow="PRICE INTELLIGENCE" title="Monitoring" meta={<span className="live-pill"><span className="live-dot" /> automatic checks</span>} />
       <div className="monitor-toolbar">
-        <div className="monitor-tabs"><button className="active">Monitoring <span>{rows.length}</span></button><button>Near Target</button><button>Target Reached</button><button>Paused</button></div>
-        <button className="primary" onClick={refresh}>Refresh prices <Zap size={14} /></button>
+        <div className="monitor-tabs">
+          <button className={filter === 'ALL' ? 'active' : ''} onClick={() => setFilter('ALL')}>All <span>{rows.length}</span></button>
+          <button className={filter === 'WATCHING' ? 'active' : ''} onClick={() => setFilter('WATCHING')}>Watching</button>
+          <button className={filter === 'TARGET_REACHED' ? 'active' : ''} onClick={() => setFilter('TARGET_REACHED')}>Target Reached</button>
+        </div>
+        <button className="primary" onClick={refresh}>Refresh all <Zap size={14} /></button>
       </div>
-      {rows.length ? (
+      {filtered.length ? (
         <div className="monitor-table panel">
           <div className="monitor-head"><span>PRODUCT</span><span>CURRENT PRICE</span><span>TARGET</span><span>STATUS</span><span>NEXT CHECK</span><span>ACTION</span></div>
-          {rows.map((m: any) => (
+          {filtered.map((m: any) => (
             <div className="monitor-line" key={m.id}>
               <div className="monitor-product">
                 <div className="product-thumb">{m.item.name.slice(0, 2).toUpperCase()}</div>
@@ -798,16 +950,20 @@ function Monitoring({ rows, refresh, openDecisionLab }: any) {
               <span>{m.item.target_price ? `₹${m.item.target_price.toLocaleString()}` : '—'}</span>
               <span className={`status ${m.status === 'TARGET_REACHED' ? 'green' : 'purple'}`}>{m.status === 'TARGET_REACHED' ? 'TARGET REACHED' : 'MONITORING'}</span>
               <span className="next"><Clock3 size={13} />{m.next_check ? new Date(m.next_check).toLocaleString() : 'scheduled'}</span>
-              <button className="icon-action" title="Decision Lab" onClick={() => m.item.product_id && openDecisionLab(m.item.product_id)}><Sparkles size={15} /></button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="icon-action" title="Check Live Price" onClick={() => onCheck(m.id)}><Zap size={14} /></button>
+                <button className="icon-action" title="Decision Lab" onClick={() => m.item.product_id && openDecisionLab(m.item.product_id)}><Sparkles size={14} /></button>
+                <button className="icon-action" title="Delete Monitor" onClick={() => onDelete(m.item.id)} style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
+              </div>
             </div>
           ))}
         </div>
-      ) : <Empty icon={Target} text="Nothing is being monitored. Add a command such as “Monitor headphones below ₹25,000”." />}
+      ) : <Empty icon={Target} text="Nothing currently matching your monitor filter." />}
     </div>
   );
 }
 
-function Deals({ deals, openDecisionLab }: any) {
+function Deals({ deals, openDecisionLab, buy }: any) {
   return (
     <div className="stack">
       <PageTitle eyebrow="AI OPPORTUNITIES" title="Deals" meta="Price intelligence" />
@@ -820,7 +976,10 @@ function Deals({ deals, openDecisionLab }: any) {
             <strong>₹{Number(d.price).toLocaleString()}</strong>
             <div className="deal-stat"><span>{d.discount_percent}% below observed average</span></div>
             <p>{d.reason}</p>
-            <button className="secondary" onClick={() => openDecisionLab(d.product_id)}>Inspect in Decision Lab <Sparkles size={13} /></button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button className="secondary" style={{ flex: 1 }} onClick={() => openDecisionLab(d.product_id)}>Decision Lab <Sparkles size={13} /></button>
+              <button className="primary" style={{ flex: 1 }} onClick={() => buy(d.product_id)}>Buy Now</button>
+            </div>
           </div>
         )) : <Empty text="No deal signals available yet." />}
       </div>
@@ -833,7 +992,7 @@ function Orders({ orders }: any) {
     <div className="stack">
       <PageTitle eyebrow="PURCHASE HISTORY" title="Orders" meta={`${orders.length} orders`} />
       <div className="panel">
-        <div className="table-head"><span>PRODUCT</span><span>STORE</span><span>PRICE</span><span>STATUS</span><span>ORDER</span></div>
+        <div className="table-head"><span>PRODUCT</span><span>STORE</span><span>PRICE</span><span>STATUS</span><span>ORDER NUMBER</span></div>
         {orders.length ? orders.map((o: any) => (
           <div className="order-row" key={o.id}>
             <div className="monitor-product"><div className="product-thumb">{o.product_name.slice(0, 2).toUpperCase()}</div><div><b>{o.product_name}</b><small>{new Date(o.created_at).toLocaleString()}</small></div></div>
@@ -848,7 +1007,7 @@ function Orders({ orders }: any) {
   );
 }
 
-function Savings({ data }: any) {
+function Savings({ data, orders }: any) {
   const value = Number(data?.stats?.verified_savings || 0);
   return (
     <div className="stack">
@@ -857,12 +1016,22 @@ function Savings({ data }: any) {
         <div><span className="hero-badge"><CircleDollarSign size={13} /> VERIFIED SAVINGS</span><h2>₹{value.toLocaleString()}</h2><p>Only savings supported by recorded prices are counted. ShopAgent never invents a saving.</p></div>
         <div className="saving-visual"><CircleDollarSign size={64} /></div>
       </div>
-      <div className="panel">
-        <div className="panel-head"><div><span className="eyebrow">HOW IT WORKS</span><h3>Trust the number</h3></div></div>
-        <div className="three-explain">
-          <Explain icon={Search} title="Observe" text="Record actual listing prices and final totals." />
-          <Explain icon={TrendingDown} title="Compare" text="Compare against the best eligible alternative." />
-          <Explain icon={Check} title="Verify" text="Count savings only after evidence is recorded." />
+      <div className="stat-grid">
+        <div className="stat-card">
+          <div>
+            <span>Orders Placed</span>
+            <b>{orders.length}</b>
+            <small>Recorded transactions</small>
+          </div>
+          <Package size={22} color="#a78bfa" />
+        </div>
+        <div className="stat-card">
+          <div>
+            <span>Avg. Savings per Order</span>
+            <b>₹{orders.length ? Math.round(value / orders.length).toLocaleString() : 0}</b>
+            <small>Real price delta</small>
+          </div>
+          <TrendingDown size={22} color="#22c55e" />
         </div>
       </div>
     </div>
@@ -870,16 +1039,29 @@ function Savings({ data }: any) {
 }
 
 function ActivityPage({ rows }: any) {
+  const [kindFilter, setKindFilter] = useState('ALL');
+
+  const filtered = rows.filter((x: any) => {
+    if (kindFilter === 'ALL') return true;
+    return x.kind?.toLowerCase() === kindFilter.toLowerCase();
+  });
+
   return (
     <div className="stack">
       <PageTitle eyebrow="TRANSPARENT AGENT" title="Agent Activity" meta="Audit trail" />
+      <div className="filterbar">
+        <button className={`filter ${kindFilter === 'ALL' ? 'active' : ''}`} onClick={() => setKindFilter('ALL')}>All Activity</button>
+        <button className={`filter ${kindFilter === 'Orders' ? 'active' : ''}`} onClick={() => setKindFilter('Orders')}>Orders</button>
+        <button className={`filter ${kindFilter === 'Products' ? 'active' : ''}`} onClick={() => setKindFilter('Products')}>Products</button>
+        <button className={`filter ${kindFilter === 'Monitoring' ? 'active' : ''}`} onClick={() => setKindFilter('Monitoring')}>Monitoring</button>
+      </div>
       <div className="panel activity-list">
-        {rows.length ? rows.map((x: any) => (
+        {filtered.length ? filtered.map((x: any) => (
           <div className="activity-item" key={x.id}>
             <span className="activity-icon"><Activity size={15} /></span>
             <div><b>{x.message}</b><small>{x.kind} • {new Date(x.created_at).toLocaleString()}</small></div>
           </div>
-        )) : <Empty icon={Activity} text="Agent activity will appear here." />}
+        )) : <Empty icon={Activity} text="No activity logs matching this filter." />}
       </div>
     </div>
   );
@@ -915,31 +1097,33 @@ function Compare({ data, back, openDecisionLab }: any) {
               </div>
             ))}
           </div>
-          <div className="source-note"><b>Source provenance</b><span>Every price card links to its original product page. Unverified search snippets are never used as a price.</span></div>
         </>
       ) : <Empty text="Select a product to compare." />}
     </div>
   );
 }
 
-function SettingsPage({ dark, setDark, aiStatus }: any) {
+function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, busy }: any) {
+  const [prefs, setPrefs] = useState(preferences || {});
+
+  useEffect(() => {
+    if (preferences) setPrefs(preferences);
+  }, [preferences]);
+
   return (
     <div className="stack">
-      <PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety first" />
+      <PageTitle eyebrow="CONTROL CENTER" title="Settings" meta="Safety & Configuration" />
       <div className="settings-grid">
         <div className="panel">
-          <div className="panel-head"><div><span className="eyebrow">AI ENGINE</span><h3>Local + API AI</h3></div></div>
+          <div className="panel-head"><div><span className="eyebrow">AI ENGINE</span><h3>Local + Cloud AI</h3></div></div>
           <div className="safety-box">
             <Bot size={18} />
             <div>
               <b>{aiStatus?.configured_provider === 'ollama' ? 'Ollama Local AI' : 'Deterministic & Local AI'}</b>
-              <span>{aiStatus?.ollama?.available ? `Ollama online • ${aiStatus.ollama.model}` : 'Running built-in high-precision deterministic & browser parser'} {aiStatus?.api?.configured ? '• Cloud API key active' : ''}</span>
+              <span>{aiStatus?.ollama?.available ? `Ollama online • ${aiStatus.ollama.model}` : 'Running built-in high-precision deterministic parser'}</span>
             </div>
             <span className="status green">ACTIVE</span>
           </div>
-          <div className="setting-row"><div><b>Free Built-in Mode</b><small>Runs high-precision deterministic parsing with no external API dependency or paid keys.</small></div><span className="status green">READY</span></div>
-          <div className="setting-row"><div><b>Ollama Mode</b><small>Optional: Connects automatically if Ollama is running locally.</small></div><span className={`status ${aiStatus?.ollama?.available ? 'green' : 'purple'}`}>{aiStatus?.ollama?.available ? 'CONNECTED' : 'OPTIONAL'}</span></div>
-          <div className="setting-row"><div><b>Hosted Cloud API</b><small>Optional: Uses OpenAI-compatible API when configured in .env.</small></div><span className={`status ${aiStatus?.api?.configured ? 'green' : 'purple'}`}>{aiStatus?.api?.configured ? 'CONFIGURED' : 'OPTIONAL'}</span></div>
         </div>
 
         <div className="panel">
@@ -948,15 +1132,34 @@ function SettingsPage({ dark, setDark, aiStatus }: any) {
         </div>
 
         <div className="panel">
-          <div className="panel-head"><div><span className="eyebrow">PURCHASE SAFETY</span><h3>Autonomous buying</h3></div></div>
-          <div className="safety-box">
-            <Zap size={18} />
+          <div className="panel-head"><div><span className="eyebrow">PURCHASE SAFETY LIMITS</span><h3>Autonomous buying rules</h3></div></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <b>Auto-checkout is strictly governed server-side</b>
-              <span>Maximum price, seller rating, spending limits, duplicate protection and approval rules are enforced before checkout.</span>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Global Order Limit (₹)</label>
+              <input type="number" style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={prefs.global_max_order || ''} onChange={e => setPrefs({ ...prefs, global_max_order: Number(e.target.value) })} />
             </div>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Monthly Spend Cap (₹)</label>
+              <input type="number" style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={prefs.monthly_max || ''} onChange={e => setPrefs({ ...prefs, monthly_max: Number(e.target.value) })} />
+            </div>
+            <SettingToggle title="Emergency Stop" text="Killswitch to immediately block all automated purchases." value={prefs.emergency_stop} onChange={(v: boolean) => setPrefs({ ...prefs, emergency_stop: v })} />
+            <button className="primary" onClick={() => savePreferences(prefs)} disabled={busy}>{busy ? 'Saving…' : 'Save Safety Limits'}</button>
           </div>
-          <div className="setting-row"><div><b>Emergency stop</b><small>Global kill-switch to immediately disable all purchase authorization.</small></div><span className="status green">READY</span></div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head"><div><span className="eyebrow">NOTIFICATIONS</span><h3>Telegram Push Alerts</h3></div></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Telegram Bot Token</label>
+              <input type="password" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={prefs.telegram_bot_token || ''} onChange={e => setPrefs({ ...prefs, telegram_bot_token: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Telegram Chat ID</label>
+              <input placeholder="987654321" style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }} value={prefs.telegram_chat_id || ''} onChange={e => setPrefs({ ...prefs, telegram_chat_id: e.target.value })} />
+            </div>
+            <button className="secondary" onClick={() => savePreferences(prefs)} disabled={busy}>{busy ? 'Saving…' : 'Save Telegram Config'}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -968,15 +1171,6 @@ function SettingToggle({ title, text, value, onChange }: any) {
     <div className="setting-row">
       <div><b>{title}</b><small>{text}</small></div>
       <button className={`toggle ${value ? 'on' : ''}`} onClick={() => onChange(!value)}><span /></button>
-    </div>
-  );
-}
-
-function Explain({ icon: Icon, title, text }: any) {
-  return (
-    <div className="explain">
-      <span><Icon size={18} /></span>
-      <div><b>{title}</b><p>{text}</p></div>
     </div>
   );
 }
