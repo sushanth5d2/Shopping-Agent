@@ -216,7 +216,7 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
     if category == 'FASHION': return 800.0
     return 1000.0
 
-def search_live_stores(category: str, query: str, base_price: float, pincode: str = '560001') -> list[dict]:
+def search_live_stores(category: str, query: str, base_price: float, pincode: str = '') -> list[dict]:
     """Search real stores for product listings via DuckDuckGo Lite. Returns live store results."""
     from urllib.parse import quote_plus, urlparse
 

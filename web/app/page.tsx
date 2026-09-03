@@ -923,8 +923,8 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
             <div className="stat-card">
               <div>
                 <span>ShopAgent Score</span>
-                <b style={{ color: '#a78bfa' }}>{score.total || 85}/100</b>
-                <small>{score.grade || 'EXCELLENT'}</small>
+                <b style={{ color: '#a78bfa' }}>{score.total !== undefined && score.total !== null ? `${score.total}/100` : '—'}</b>
+                <small>{score.grade || 'PENDING'}</small>
               </div>
               <Sparkles size={22} color="#a78bfa" />
             </div>
@@ -932,9 +932,9 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
               <div>
                 <span>Regret Shield Risk</span>
                 <b style={{ color: regret.risk === 'LOW' ? '#22c55e' : regret.risk === 'HIGH' ? '#ef4444' : '#f59e0b' }}>
-                  {regret.risk || 'LOW'}
+                  {regret.risk || 'ANALYZING'}
                 </b>
-                <small>{regret.probability_pct || 15}% Remorse Risk</small>
+                <small>{regret.probability_pct !== undefined && regret.probability_pct !== null ? `${regret.probability_pct}% Remorse Risk` : 'Assessing risk'}</small>
               </div>
               <ShieldAlert size={22} color={regret.risk === 'LOW' ? '#22c55e' : '#f59e0b'} />
             </div>
@@ -1098,7 +1098,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
               <h3>Sustainability & Eco Guardian</h3>
             </div>
             <span className="status green" style={{ fontSize: 13, fontWeight: 700, padding: '4px 10px' }}>
-              GRADE {data.sustainability.eco_grade || 'A+'} ({data.sustainability.eco_points || 90}/100)
+              GRADE {data.sustainability?.eco_grade || 'PENDING'} ({data.sustainability?.eco_points ?? 0}/100)
             </span>
           </div>
           <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: 14 }}>
@@ -1867,18 +1867,18 @@ function SettingsPage({ dark, setDark, aiStatus, preferences, savePreferences, b
               <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>Delivery Pincode</label>
               <input
                 style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
-                value={prefs.delivery_pincode || '560001'}
+                value={prefs.delivery_pincode || ''}
                 onChange={e => setPrefs({ ...prefs, delivery_pincode: e.target.value })}
-                placeholder="560001 / 110001"
+                placeholder="Enter delivery pincode (e.g. 560001, 110001)"
               />
             </div>
             <div>
               <label style={{ fontSize: 13, color: '#cbd5e1', display: 'block', marginBottom: 4 }}>City / Area</label>
               <input
                 style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: '#1e1b4b', border: '1px solid #4338ca', color: '#fff' }}
-                value={prefs.delivery_city || 'Bengaluru'}
+                value={prefs.delivery_city || ''}
                 onChange={e => setPrefs({ ...prefs, delivery_city: e.target.value })}
-                placeholder="Bengaluru / Mumbai / Delhi"
+                placeholder="Enter city or area (e.g. Bengaluru, Mumbai, Delhi)"
               />
             </div>
           </div>

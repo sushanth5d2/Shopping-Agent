@@ -117,8 +117,8 @@ class PrefIn(BaseModel):
  custom_ai_base_url:str='https://api.openai.com/v1'
  custom_ai_api_key:str=''
  custom_ai_model:str='gpt-4o-mini'
- delivery_pincode:str='560001'
- delivery_city:str='Bengaluru'
+ delivery_pincode:str=''
+ delivery_city:str=''
 
 class TestAiIn(BaseModel):
  base_url:str='https://api.openai.com/v1'
@@ -234,7 +234,7 @@ def dashboard(u=Depends(current_user),db:Session=Depends(get_db)):
 @app.get('/api/items')
 def items(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);return {'items':[item_obj(db,x) for x in db.query(ShoppingItem).filter_by(list_id=sl.id).order_by(ShoppingItem.created_at.desc()).all()]}
-def find_or_create_product_for_name(db, name: str, default_price: float | None = None, pincode: str = '560001') -> Product:
+def find_or_create_product_for_name(db, name: str, default_price: float | None = None, pincode: str = '') -> Product:
  clean = name.strip()
  words = set(re.findall(r'[a-z0-9]+', clean.lower()))
  all_prods = db.query(Product).all()
@@ -314,7 +314,7 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
 def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
   sl=user_list(db,u)
   pref=db.query(UserPreference).filter_by(user_id=u.id).first()
-  pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+  pincode = getattr(pref, 'delivery_pincode', '') if pref else ''
 
   raw_name = p.name.strip()
 
@@ -481,7 +481,7 @@ def swap_item(item_id:int,p:SwapIn,u=Depends(current_user),db:Session=Depends(ge
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it:raise HTTPException(404,'Item not found')
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
- pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+ pincode = getattr(pref, 'delivery_pincode', '') if pref else ''
  matched_prod = find_or_create_product_for_name(db, p.new_name, it.target_price or it.max_price, pincode=pincode)
  old_name = it.name
  it.name = p.new_name
@@ -536,7 +536,7 @@ def test_ai(p:TestAiIn,u=Depends(current_user)):
 @app.post('/api/intent')
 def intent(p:Intent,u=Depends(current_user),db:Session=Depends(get_db)):
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
- pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+ pincode = getattr(pref, 'delivery_pincode', '') if pref else ''
  parsed=get_ai_provider(pref=pref).parse(p.text)
  sl=user_list(db,u)
  chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]
@@ -654,7 +654,7 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
 
  # Find or generate cross-store comparison listings for this genuine product
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
- pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+ pincode = getattr(pref, 'delivery_pincode', '') if pref else ''
  product = find_or_create_product_for_name(db, source.name, source.price, pincode=pincode)
  
  # Ensure the observed URL store listing exists
