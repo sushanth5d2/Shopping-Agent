@@ -398,8 +398,12 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
    db.commit(); db.refresh(it)
    return item_obj(db, it)
 
-  # Check if multi-item comma-separated input (e.g. "garlic, bread, jam")
-  sub_names = [x.strip() for x in re.split(r',|\band\b', p.name, flags=re.I) if x.strip()]
+  # Check if multi-item input (comma, newline, or space-separated list of items)
+  sub_names = [x.strip() for x in re.split(r'[,;\n]+|\band\b', p.name, flags=re.I) if x.strip()]
+  if len(sub_names) <= 1:
+   tokens = [w.strip() for w in p.name.split() if len(w.strip()) >= 3]
+   if len(tokens) >= 2 and all(classify_product_category(t) == 'GROCERY' for t in tokens):
+    sub_names = tokens
   if len(sub_names) > 1:
    created_items = []
    for item_n in sub_names:

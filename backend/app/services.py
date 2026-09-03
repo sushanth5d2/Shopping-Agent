@@ -52,7 +52,7 @@ def classify_product_category(name: str) -> str:
     n = name.lower()
     grocery_kw = [
         'tomato', 'tomatos', 'tomatoes', 'chilli', 'chili', 'garlic', 'ginger', 'onion', 'potato',
-        'butter', 'milk', 'cheese', 'paneer', 'curd', 'bread', 'egg', 'eggs', 'rice', 'atta',
+        'butter', 'milk', 'cheese', 'paneer', 'curd', 'bread', 'jam', 'sauce', 'sos', 'ketchup', 'egg', 'eggs', 'rice', 'atta',
         'flour', 'dal', 'oil', 'ghee', 'sugar', 'salt', 'tea', 'coffee', 'maggi', 'noodle', 'biscuit',
         'chips', 'snack', 'vegetable', 'fruit', 'apple', 'banana', 'mango', 'lemon', 'coriander',
         'mint', 'grocery', 'fresh', 'veggie', 'soap', 'shampoo', 'detergent', 'toothpaste'
@@ -179,12 +179,26 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
         clean = re.split(r'[:|;(\[]', name)[0].strip() or name[:40]
         results = duckduckgo_search(f"{clean} price India", timeout=6)
         for r in results:
-            if r.get('price', 0) > 0:
-                return float(r['price'])
+            p = r.get('price', 0)
+            if p > 0:
+                if category == 'GROCERY' and (p > 350 or p < 5):
+                    continue
+                return float(p)
     except Exception:
         pass
 
     nl = name.lower()
+    if category == 'GROCERY':
+        if 'garlic' in nl: return 50.0
+        if 'onion' in nl: return 40.0
+        if 'bread' in nl: return 45.0
+        if 'jam' in nl: return 85.0
+        if 'sauce' in nl or 'sos' in nl or 'ketchup' in nl: return 65.0
+        if 'milk' in nl: return 35.0
+        if 'egg' in nl: return 80.0
+        if 'butter' in nl: return 58.0
+        return 60.0
+
     if 'iphone 16 pro max' in nl: return 144900.0
     if 'iphone 16 pro' in nl: return 119900.0
     if 'iphone 16 plus' in nl: return 77900.0
@@ -197,7 +211,6 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
     if 'pixel 9 pro' in nl: return 109999.0
     if 'pixel 9' in nl: return 69999.0
 
-    if category == 'GROCERY': return 100.0
     if category == 'ELECTRONICS': return 5000.0
     if category == 'HEALTH': return 300.0
     if category == 'FASHION': return 800.0
@@ -259,8 +272,9 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
             if not store_name:
                 store_name = host.split('.')[0].capitalize() if host else 'Online Store'
 
-            seen_hosts.add(host)
             price = res.get('price', 0.0)
+            if category == 'GROCERY' and (price > 450 or price < 5):
+                price = bp
 
             results.append({
                 'name': store_name,
