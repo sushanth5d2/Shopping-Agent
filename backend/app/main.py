@@ -184,8 +184,16 @@ def product_summary(db, pid, include_details: bool = True):
  p=db.get(Product,pid)
  if not p:raise HTTPException(404,'Product not found')
  out=[]
- for l in db.query(StoreListing).filter_by(product_id=pid).all():
-  st=db.get(Store,l.store_id);seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
+ seen_stores=set()
+ for l in db.query(StoreListing).filter_by(product_id=pid).order_by(StoreListing.price.asc()).all():
+  st=db.get(Store,l.store_id)
+  if not st: continue
+  s_norm = st.name.strip().lower()
+  if s_norm in seen_stores: continue
+  if any(b in (st.base_url or '').lower() or b in s_norm for b in ['wikipedia', 'merriam', 'alternativeto', 'quora', 'reddit', 'support.apple', 'en']):
+   continue
+  seen_stores.add(s_norm)
+  seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
   out.append({'listing_id':l.id,'store':st.name,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])

@@ -1038,6 +1038,40 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
             </div>
           ))}
         </div>
+
+        {/* Verified Customer Reviews (Amazon & Flipkart Buyers) */}
+        {(reviews.customer_reviews || []).length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <h4 style={{ fontSize: 14, color: '#f8fafc', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Users size={16} color="#38bdf8" /> Verified Customer Reviews (Amazon &amp; Flipkart Buyers)
+            </h4>
+            <div className="listing-grid">
+              {reviews.customer_reviews.map((cr: any, i: number) => (
+                <div className="listing-card" key={`cr-${i}`} style={{ background: '#0b1329', borderColor: '#1e293b' }}>
+                  <div className="listing-head">
+                    <span className="store-label" style={{ color: '#38bdf8', fontWeight: 600 }}>{cr.store}</span>
+                    <span className="status green" style={{ fontSize: 11 }}>★ {Number(cr.rating).toFixed(1)} / 5</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', margin: '6px 0 8px' }}>
+                    <b style={{ color: '#e2e8f0' }}>{cr.buyer_name}</b> · <span style={{ color: '#10b981' }}>{cr.badge}</span>
+                  </div>
+                  <b style={{ display: 'block', fontSize: 13, color: '#fff', margin: '4px 0' }}>{cr.title}</b>
+                  <p style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5, margin: '6px 0 10px' }}>{cr.review}</p>
+                  {cr.pros && cr.pros.length > 0 && (
+                    <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <ThumbsUp size={12} /> <b>Pros:</b> {cr.pros.join(', ')}
+                    </div>
+                  )}
+                  {cr.cons && cr.cons.length > 0 && (
+                    <div style={{ fontSize: 11, color: '#f87171', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <ThumbsDown size={12} /> <b>Cons:</b> {cr.cons.join(', ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Pros & Cons Analysis */}
@@ -1154,6 +1188,11 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
                   <span className="status purple">{sub.type}</span>
                 </div>
                 <b style={{ display: 'block', fontSize: 14, color: '#fff', margin: '8px 0 4px' }}>{sub.name}</b>
+                {sub.specs && (
+                  <div style={{ fontSize: 11, color: '#818cf8', margin: '4px 0 6px', lineHeight: 1.4 }}>
+                    <b>Specs:</b> {sub.specs}
+                  </div>
+                )}
                 <div className="listing-price">₹{Number(sub.price).toLocaleString()}</div>
                 <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 10px' }}>{sub.reason}</p>
                 {sub.savings > 0 && (
@@ -1597,7 +1636,17 @@ function Compare({ data, back, openDecisionLab, onSwap }: any) {
                       <span className="status purple">{sub.type}</span>
                     </div>
                     <b style={{ display: 'block', fontSize: 13, color: '#fff', margin: '8px 0 4px' }}>{sub.name}</b>
+                    {sub.specs && (
+                      <div style={{ fontSize: 11, color: '#818cf8', margin: '4px 0 6px', lineHeight: 1.4 }}>
+                        <b>Specs:</b> {sub.specs}
+                      </div>
+                    )}
                     <div className="listing-price">₹{Number(sub.price).toLocaleString()}</div>
+                    {sub.savings > 0 && (
+                      <div style={{ color: '#22c55e', fontSize: 11, fontWeight: 600, margin: '2px 0 6px' }}>
+                        💰 Save ₹{Number(sub.savings).toLocaleString()} vs current
+                      </div>
+                    )}
                     <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 10px' }}>{sub.reason}</p>
                     <button
                       type="button"
