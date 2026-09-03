@@ -194,7 +194,7 @@ def product_summary(db, pid, include_details: bool = True):
    continue
   seen_stores.add(s_norm)
   seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
-  out.append({'listing_id':l.id,'store':st.name,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True})
+  out.append({'listing_id':l.id,'store':st.name,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(st.name,l.price)})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
  substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total']) if include_details else []

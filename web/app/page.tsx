@@ -7,7 +7,7 @@ import {
   ChevronDown, ExternalLink, ShieldAlert, Zap, Layers3,
   ShoppingCart, AlertTriangle, PlayCircle, Scale, Clock3,
   Check, Menu, X, Plus, Trash2, Bell, Gift, Users, Leaf,
-  FileText, RefreshCw, ThumbsUp, ThumbsDown
+  FileText, RefreshCw, ThumbsUp, ThumbsDown, CreditCard
 } from 'lucide-react';
 
 interface Item {
@@ -47,6 +47,7 @@ interface Listing {
   returns?: string;
   match_score?: number;
   url?: string;
+  card_offers?: Array<{ bank: string; offer: string; effective_price: number; type: string; badge: string }>;
 }
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
@@ -1613,6 +1614,34 @@ function Compare({ data, back, openDecisionLab, onSwap }: any) {
                   <div><span>Warranty</span><b>{l.warranty || 'Not provided'}</b></div>
                   <div><span>Returns</span><b>{l.returns || 'Not provided'}</b></div>
                 </div>
+
+                {/* Bank & Credit Card Offers */}
+                {l.card_offers && l.card_offers.length > 0 && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #334155' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <CreditCard size={13} /> BANK &amp; CARD OFFERS ({l.card_offers.length})
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {l.card_offers.map((co: any, ci: number) => (
+                        <div key={ci} style={{ background: '#0b1329', padding: '6px 8px', borderRadius: 6, border: '1px solid #1e293b', fontSize: 11 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                            <b style={{ color: '#f8fafc' }}>{co.bank}</b>
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: co.type === 'CASHBACK' ? '#065f46' : (co.type === 'NO COST EMI' ? '#3730a3' : '#1e3a8a'), color: '#e2e8f0' }}>
+                              {co.badge}
+                            </span>
+                          </div>
+                          <div style={{ color: '#94a3b8', lineHeight: 1.3 }}>{co.offer}</div>
+                          {co.effective_price < l.price && (
+                            <div style={{ color: '#4ade80', fontWeight: 600, marginTop: 2, fontSize: 10 }}>
+                              ⚡ Effective: ₹{Number(co.effective_price).toLocaleString()}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {l.url && <a className="retailer-link" href={l.url} target="_blank" rel="noreferrer">Open retailer <ExternalLink size={14} /></a>}
               </div>
             ))}
