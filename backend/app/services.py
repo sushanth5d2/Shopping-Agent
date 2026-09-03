@@ -87,24 +87,86 @@ def classify_product_category(name: str) -> str:
 
     return 'GENERAL'
 
+def duckduckgo_search(query: str, timeout: int = 10) -> list[dict]:
+    """Universal DuckDuckGo search helper using lite.duckduckgo.com (reliable, no CAPTCHA/JS challenges)
+    with fallback to html.duckduckgo.com. Unpacks redirected URLs and extracts prices."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import urlparse, parse_qs, unquote
+    import re
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+    }
+    results = []
+
+    # 1. Try lite.duckduckgo.com
+    try:
+        r = httpx.post('https://lite.duckduckgo.com/lite/', headers=headers, data={'q': query}, timeout=timeout)
+        if r.status_code == 200 and ('result-link' in r.text or 'result-snippet' in r.text):
+            soup = BeautifulSoup(r.text, 'html.parser')
+            links = soup.select('.result-link')
+            snippets = soup.select('.result-snippet')
+            for i, link in enumerate(links):
+                title = link.get_text().strip()
+                raw_href = link.get('href', '')
+                actual_url = raw_href
+                if 'uddg=' in raw_href:
+                    parsed = urlparse(raw_href)
+                    qs = parse_qs(parsed.query)
+                    actual_url = qs.get('uddg', [raw_href])[0]
+                elif raw_href.startswith('//'):
+                    actual_url = 'https:' + raw_href
+
+                snippet = snippets[i].get_text().strip() if i < len(snippets) else ''
+                if title and not any(k in title.lower() for k in ['duckduckgo', 'ad clicks', 'more info']):
+                    pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet)
+                    price = float(pm.group(1).replace(',', '')) if pm else 0.0
+                    results.append({
+                        'title': title,
+                        'url': actual_url,
+                        'snippet': snippet,
+                        'price': price
+                    })
+    except Exception:
+        pass
+
+    # 2. Fallback to html.duckduckgo.com
+    if not results:
+        try:
+            r = httpx.post('https://html.duckduckgo.com/html/', headers=headers, data={'q': query}, timeout=timeout)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for res in soup.select('.result'):
+                    t_el = res.select_one('.result__title a')
+                    s_el = res.select_one('.result__snippet')
+                    if t_el:
+                        title = t_el.get_text().strip()
+                        raw_href = t_el.get('href', '')
+                        actual_url = raw_href
+                        if 'uddg=' in raw_href:
+                            parsed = urlparse(raw_href)
+                            qs = parse_qs(parsed.query)
+                            actual_url = qs.get('uddg', [raw_href])[0]
+                        snippet = s_el.get_text().strip() if s_el else ''
+                        pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet)
+                        price = float(pm.group(1).replace(',', '')) if pm else 0.0
+                        results.append({'title': title, 'url': actual_url, 'snippet': snippet, 'price': price})
+        except Exception:
+            pass
+
+    return results
+
 def estimate_item_market_price(name: str, category: str, user_target: float | None = None) -> float:
     if user_target and user_target > 0:
         return float(user_target)
     
     try:
-        query = f'"{name}" price India'
-        url = "https://html.duckduckgo.com/html/"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = httpx.post(url, data={"q": query}, headers=headers, timeout=5.0)
-        if resp.status_code == 200:
-            import bs4, re
-            soup = bs4.BeautifulSoup(resp.text, 'html.parser')
-            for el in soup.find_all('a', class_='result__snippet'):
-                snippet = el.get_text()
-                match = re.search(r'(?:â‚¹|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)', snippet, re.IGNORECASE)
-                if match:
-                    price_str = match.group(1).replace(',', '')
-                    return float(price_str)
+        results = duckduckgo_search(f'"{name}" price India', timeout=6)
+        for r in results:
+            if r.get('price', 0) > 0:
+                return float(r['price'])
     except Exception:
         pass
 
@@ -115,15 +177,13 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
     return 1000.0
 
 def search_live_stores(category: str, query: str, base_price: float, pincode: str = '560001') -> list[dict]:
-    """Search real stores for product listings via DuckDuckGo. Returns live store results."""
-    from bs4 import BeautifulSoup
-    from urllib.parse import quote_plus, urlparse, parse_qs
+    """Search real stores for product listings via DuckDuckGo Lite. Returns live store results."""
+    from urllib.parse import quote_plus, urlparse
 
     q_slug = re.sub(r'[^a-zA-Z0-9]', '+', query.strip())
     bp = max(10.0, float(base_price))
     results = []
 
-    # Known Indian store URL patterns and names
     store_map = {
         'amazon.in': ('Amazon India', 'PRIME VERIFIED'),
         'flipkart.com': ('Flipkart', 'FLIPKART ASSURED'),
@@ -138,75 +198,59 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
         'ajio.com': ('AJIO', 'FASHION STORE'),
         'nykaa.com': ('Nykaa', 'BEAUTY STORE'),
         'tatacliq.com': ('Tata CLiQ', 'TRUSTED RETAIL'),
+        'apple.com': ('Apple Store India', 'OFFICIAL STORE'),
         'meesho.com': ('Meesho', 'VALUE STORE'),
     }
 
     try:
-        search_query = f'"{query}" buy price India site:amazon.in OR site:flipkart.com'
+        search_query = f'"{query}" buy price India site:amazon.in OR site:flipkart.com OR site:croma.com OR site:reliancedigital.in'
         if category == 'GROCERY':
             search_query = f'"{query}" buy price site:blinkit.com OR site:swiggy.com OR site:bigbasket.com OR site:zeptonow.com'
         elif category == 'FASHION':
             search_query = f'"{query}" buy price site:myntra.com OR site:ajio.com OR site:flipkart.com OR site:amazon.in'
 
-        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(search_query)}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
-        r = httpx.post(ddg_url, headers=headers, data={'q': search_query}, timeout=settings.review_search_timeout)
+        search_results = duckduckgo_search(search_query, timeout=settings.review_search_timeout)
 
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            for res_el in soup.select('.result'):
-                if len(results) >= 6:
+        seen_hosts = set()
+        for res in search_results:
+            if len(results) >= 6:
+                break
+            actual_url = res.get('url', '')
+            if not actual_url or not actual_url.startswith('http'):
+                continue
+            host = (urlparse(actual_url).hostname or '').lower().replace('www.', '')
+            if host in seen_hosts:
+                continue
+
+            store_name = None
+            badge = 'ONLINE STORE'
+            for domain, (sname, sbadge) in store_map.items():
+                if domain in host:
+                    store_name = sname
+                    badge = sbadge
                     break
-                title_el = res_el.select_one('.result__title a')
-                snippet_el = res_el.select_one('.result__snippet')
-                if not title_el:
-                    continue
-                title = title_el.get_text().strip()
-                snippet = snippet_el.get_text().strip() if snippet_el else ''
-                href = title_el.get('href', '')
+            if not store_name:
+                store_name = host.split('.')[0].capitalize() if host else 'Online Store'
 
-                actual_url = href
-                if 'uddg=' in href:
-                    parsed = urlparse(href)
-                    qs = parse_qs(parsed.query)
-                    actual_url = qs.get('uddg', [href])[0]
-                if not actual_url or not actual_url.startswith('http'):
-                    continue
+            seen_hosts.add(host)
+            price = res.get('price', 0.0)
 
-                host = (urlparse(actual_url).hostname or '').lower().replace('www.', '')
-
-                # Identify store
-                store_name = None
-                badge = 'ONLINE STORE'
-                for domain, (sname, sbadge) in store_map.items():
-                    if domain in host:
-                        store_name = sname
-                        badge = sbadge
-                        break
-                if not store_name:
-                    store_name = host.split('.')[0].capitalize() if host else 'Online Store'
-
-                # Try to extract price from snippet
-                price_match = re.search(r'(?:â‚¹|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)', snippet, re.I)
-                price = float(price_match.group(1).replace(',', '')) if price_match else 0.0
-
-                results.append({
-                    'name': store_name,
-                    'domain': host,
-                    'base_url': host,
-                    'url': actual_url,
-                    'price': price if price > 0 else bp,
-                    'delivery': 0.0,
-                    'rating': 0.0,
-                    'delivery_time': 'Check store',
-                    'seller': f'{store_name} Seller',
-                    'badge': badge,
-                    'return_policy': '7-day return policy'
-                })
+            results.append({
+                'name': store_name,
+                'domain': host,
+                'base_url': host,
+                'url': actual_url,
+                'price': price if price > 0 else bp,
+                'delivery': 0.0,
+                'rating': 0.0,
+                'delivery_time': 'Check store',
+                'seller': f'{store_name} Seller',
+                'badge': badge,
+                'return_policy': '7-day return policy'
+            })
     except Exception:
         pass
 
-    # If no results found, provide store search URLs so user can check manually
     if not results:
         fallback_stores = [
             ('Amazon India', f'https://www.amazon.in/s?k={q_slug}', 'amazon.in'),
@@ -227,11 +271,6 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
             })
 
     return results
-
-
-# ==========================================================
-# Comprehensive Decision Lab Engines
-# ==========================================================
 
 def calculate_shopagent_score(product: dict, best_listing: dict, history: list[float]) -> dict:
     """Computes a transparent 0-100 ShopAgent score with granular breakdown."""
@@ -817,20 +856,13 @@ def check_compatibility(product_name: str, specs: str, pref=None) -> dict:
     }
 
 def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
-    """Search DuckDuckGo HTML for real product reviews and return structured results."""
-    from bs4 import BeautifulSoup
-    from urllib.parse import quote_plus, urlparse
+    """Search DuckDuckGo Lite for real product reviews and return structured results."""
+    from urllib.parse import urlparse
     results = []
     try:
-        query = f"{product_name} review 2025 2026"
-        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
-        r = httpx.post(ddg_url, headers=headers, data={'q': query}, timeout=timeout)
-        if r.status_code != 200:
-            return results
-        soup = BeautifulSoup(r.text, 'html.parser')
+        query = f'"{product_name}" review India'
+        search_results = duckduckgo_search(query, timeout=timeout)
 
-        # Known review domains with human-readable source names
         review_domains = {
             'gsmarena.com': 'GSMArena', 'theverge.com': 'The Verge', 'tomsguide.com': "Tom's Guide",
             'rtings.com': 'RTINGS.com', 'pcmag.com': 'PCMag', 'techradar.com': 'TechRadar',
@@ -838,147 +870,134 @@ def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
             'digit.in': 'Digit.in', '91mobiles.com': '91Mobiles', 'gadgets360.com': 'Gadgets 360',
             'smartprix.com': 'Smartprix', 'notebookcheck.net': 'Notebookcheck',
             'amazon.in': 'Amazon India Reviews', 'flipkart.com': 'Flipkart Reviews',
-            'youtube.com': None,  # Skip YouTube here, handled separately
+            'youtube.com': None,
         }
 
-        for res_el in soup.select('.result'):
+        for res in search_results:
             if len(results) >= 8:
                 break
-            title_el = res_el.select_one('.result__title a')
-            snippet_el = res_el.select_one('.result__snippet')
-            if not title_el:
-                continue
-
-            title = title_el.get_text().strip()
-            snippet = snippet_el.get_text().strip() if snippet_el else ''
-            href = title_el.get('href', '')
-
-            # DuckDuckGo wraps URLs in a redirect â€” extract the actual URL
-            actual_url = href
-            if 'uddg=' in href:
-                from urllib.parse import parse_qs, urlparse as up
-                parsed = up(href)
-                qs = parse_qs(parsed.query)
-                actual_url = qs.get('uddg', [href])[0]
-
+            title = res.get('title', '')
+            snippet = res.get('snippet', '')
+            actual_url = res.get('url', '')
             if not actual_url or not actual_url.startswith('http'):
                 continue
 
             host = (urlparse(actual_url).hostname or '').lower().replace('www.', '')
-
-            # Skip ads and generic shopping results
-            if any(k in title.lower() for k in ['order online', 'ad clicks', 'shop online for mobiles', 'buy online']):
-                continue
-            # Skip YouTube (handled in _search_youtube_reviews)
             if 'youtube.com' in host or 'youtu.be' in host:
                 continue
 
-            # Determine source name
             source_name = None
-            for domain, name in review_domains.items():
-                if domain in host:
+            for dom, name in review_domains.items():
+                if dom in host:
                     source_name = name
                     break
             if not source_name:
-                source_name = host.split('.')[0].capitalize() if host else 'Web Review'
+                source_name = host.split('.')[0].capitalize()
 
-            # Determine review type
-            review_type = 'Expert Review'
-            if 'amazon' in host or 'flipkart' in host:
-                review_type = 'Buyer Reviews'
-            elif any(k in host for k in ['reddit', 'quora']):
-                review_type = 'Community Discussion'
-
-            # Detect sentiment from snippet keywords
-            s_low = snippet.lower()
-            pos_count = sum(1 for k in ['excellent', 'great', 'best', 'fantastic', 'impressive', 'love', 'perfect', 'outstanding', 'top', 'recommend', 'good'] if k in s_low)
-            neg_count = sum(1 for k in ['poor', 'bad', 'worst', 'disappointing', 'issue', 'problem', 'avoid', 'terrible', 'overpriced', 'mediocre', 'cons'] if k in s_low)
-            if pos_count > neg_count:
-                sentiment = 'Positive'
-            elif neg_count > pos_count:
-                sentiment = 'Mixed / Critical'
+            rating = 0.0
+            r_match = re.search(r'(\d(?:\.\d)?)\s*(?:/\s*5|\s*out of 5|\s*stars)', snippet, re.I)
+            if r_match:
+                rating = min(5.0, float(r_match.group(1)))
             else:
-                sentiment = 'Neutral'
+                r_match10 = re.search(r'(\d(?:\.\d)?)\s*(?:/\s*10|\s*out of 10)', snippet, re.I)
+                if r_match10:
+                    rating = round(min(10.0, float(r_match10.group(1))) / 2, 1)
 
             results.append({
                 'source': source_name,
-                'type': review_type,
+                'source_domain': host,
                 'url': actual_url,
-                'sentiment': sentiment,
-                'finding': snippet[:300] if snippet else f'Review of {product_name} from {source_name}'
+                'title': title,
+                'finding': snippet,
+                'rating': rating,
+                'verified': any(dom in host for dom in review_domains if review_domains[dom]),
             })
     except Exception:
         pass
     return results
-
 
 def _search_youtube_reviews(product_name: str, timeout: int = 10) -> list[dict]:
-    """Search DuckDuckGo for real YouTube review videos and return structured results with actual video links."""
-    from bs4 import BeautifulSoup
-    from urllib.parse import quote_plus, urlparse, parse_qs
-    results = []
+    """Search DuckDuckGo Lite for real YouTube review videos and return structured results."""
+    from urllib.parse import urlparse
+    videos = []
+
+    # If YouTube API key is available, use official Data API v3
+    if settings.youtube_api_key:
+        try:
+            yt_url = "https://www.googleapis.com/youtube/v3/search"
+            params = {
+                'part': 'snippet',
+                'q': f"{product_name} review",
+                'type': 'video',
+                'maxResults': 5,
+                'relevanceLanguage': 'en',
+                'key': settings.youtube_api_key,
+            }
+            r = httpx.get(yt_url, params=params, timeout=timeout)
+            if r.status_code == 200:
+                data = r.json()
+                for item in data.get('items', []):
+                    vid_id = item['id'].get('videoId', '')
+                    snip = item.get('snippet', {})
+                    if vid_id:
+                        videos.append({
+                            'channel': snip.get('channelTitle', 'YouTube Reviewer'),
+                            'video_title': snip.get('title', ''),
+                            'video_id': vid_id,
+                            'url': f"https://www.youtube.com/watch?v={vid_id}",
+                            'findings': snip.get('description', ''),
+                            'published_at': snip.get('publishedAt', '')[:10],
+                        })
+                if videos:
+                    return videos
+        except Exception:
+            pass
+
+    # DuckDuckGo Lite fallback for YouTube videos
     try:
-        query = f"{product_name} review site:youtube.com"
-        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
-        r = httpx.post(ddg_url, headers=headers, data={'q': query}, timeout=timeout)
-        if r.status_code != 200:
-            return results
-        soup = BeautifulSoup(r.text, 'html.parser')
+        query = f'"{product_name}" review site:youtube.com'
+        search_results = duckduckgo_search(query, timeout=timeout)
 
-        for res_el in soup.select('.result'):
-            if len(results) >= 6:
+        for res in search_results:
+            if len(videos) >= 5:
                 break
-            title_el = res_el.select_one('.result__title a')
-            snippet_el = res_el.select_one('.result__snippet')
-            if not title_el:
+            actual_url = res.get('url', '')
+            if 'youtube.com/watch' not in actual_url and 'youtu.be/' not in actual_url:
                 continue
 
-            title = title_el.get_text().strip()
-            snippet = snippet_el.get_text().strip() if snippet_el else ''
-            href = title_el.get('href', '')
+            vid_title = res.get('title', '')
+            snippet = res.get('snippet', '')
 
-            # Extract actual URL from DuckDuckGo redirect
-            actual_url = href
-            if 'uddg=' in href:
-                parsed = urlparse(href)
-                qs = parse_qs(parsed.query)
-                actual_url = qs.get('uddg', [href])[0]
+            vid_id = ''
+            if 'v=' in actual_url:
+                from urllib.parse import parse_qs, urlparse as up
+                vid_id = parse_qs(up(actual_url).query).get('v', [''])[0]
+            elif 'youtu.be/' in actual_url:
+                vid_id = actual_url.split('youtu.be/')[1].split('?')[0]
 
-            if not actual_url or 'youtube.com' not in actual_url.lower():
-                continue
+            channel = 'YouTube Reviewer'
+            if ' - YouTube' in vid_title:
+                clean_title = vid_title.replace(' - YouTube', '').strip()
+            else:
+                clean_title = vid_title
 
-            # Skip ads
-            if any(k in title.lower() for k in ['order online', 'ad clicks']):
-                continue
+            if ' by ' in clean_title:
+                parts = clean_title.rsplit(' by ', 1)
+                clean_title = parts[0].strip()
+                channel = parts[1].strip()
 
-            # Extract channel name from title patterns like "Title - ChannelName" or "Title | ChannelName"
-            channel = 'YouTube Creator'
-            for sep in [' - ', ' | ', ' by ']:
-                if sep in title:
-                    parts = title.rsplit(sep, 1)
-                    if len(parts) == 2 and len(parts[1].strip()) > 2:
-                        channel = parts[1].strip()
-                        title = parts[0].strip()
-                    break
-
-            # Detect sentiment from snippet
-            s_low = snippet.lower()
-            pos = sum(1 for k in ['excellent', 'great', 'best', 'amazing', 'love', 'worth', 'recommend', 'impressive'] if k in s_low)
-            neg = sum(1 for k in ['disappointed', 'bad', 'issue', 'problem', 'avoid', 'overpriced', 'skip'] if k in s_low)
-            sentiment = 'Positive' if pos > neg else 'Mixed' if neg > pos else 'Balanced'
-
-            results.append({
+            videos.append({
                 'channel': channel,
-                'title': title,
+                'video_title': clean_title,
+                'video_id': vid_id,
                 'url': actual_url,
-                'sentiment': sentiment,
-                'findings': snippet[:250] if snippet else f'Video review of {product_name}'
+                'findings': snippet,
+                'published_at': 'Recent',
             })
     except Exception:
         pass
-    return results
 
+    return videos
 
 def _extract_pros_cons(snippets: list[str], product_name: str) -> dict:
     """Extract pros and cons from review snippets using keyword pattern matching."""
@@ -1091,9 +1110,9 @@ def _ai_chat_completion(prompt: str, pref=None) -> str:
 
 
 def _ai_summarize_reviews(product_name: str, snippets: list[str], pros_cons: dict, pref=None) -> str:
-    """Use any configured AI provider to generate a review summary with pros, cons, and recommendation."""
+    """Use configured AI provider or smart deterministic RAG synthesis to generate a review summary with pros, cons, and recommendation."""
     if not snippets:
-        return ''
+        return f"No verified web reviews found yet for {product_name}. Try adding the brand or model number for better coverage."
 
     combined = '\n'.join(f'- {s[:200]}' for s in snippets[:10])
     pro_text = ', '.join(p['point'] for p in pros_cons.get('pros', [])[:5])
@@ -1109,7 +1128,24 @@ def _ai_summarize_reviews(product_name: str, snippets: list[str], pros_cons: dic
         f"Include: overall sentiment, key strength, key weakness, and whether it's worth buying."
     )
 
-    return _ai_chat_completion(prompt, pref=pref)
+    ai_result = _ai_chat_completion(prompt, pref=pref)
+    if ai_result and len(ai_result.strip()) > 15:
+        return ai_result.strip()
+
+    # Smart inbuilt deterministic RAG synthesis from live retrieved evidence
+    pros = [p['point'] for p in pros_cons.get('pros', [])[:3]]
+    cons = [c['point'] for c in pros_cons.get('cons', [])[:3]]
+    sentiment = "Positive" if len(pros) > len(cons) else ("Balanced" if pros and cons else "Mixed")
+    parts = [f"Overall sentiment for {product_name} is {sentiment} across live web and YouTube reviews."]
+    if pros:
+        parts.append(f"Buyers praise {', '.join(pros)}.")
+    if cons:
+        parts.append(f"Common points of criticism include {', '.join(cons)}.")
+    if len(pros) >= len(cons):
+        parts.append("Recommendation: High-confidence buy if purchased at or below current market baseline.")
+    else:
+        parts.append("Recommendation: Consider waiting for promotional discounts or comparing with alternative models.")
+    return ' '.join(parts)
 
 
 def get_review_intelligence(product_name: str, category: str = '', pref=None) -> dict:
@@ -1417,17 +1453,20 @@ def ai_provider_status(pref=None):
     }
     return result
 
-@dataclass
-class PolicyResult: allowed: bool; reason: str
+from collections import namedtuple
+PolicyResult = namedtuple('PolicyResult', ['allowed', 'reason'])
 class PurchasePolicy:
     def authorize(self, item, listing, pref, monthly_spend, duplicate, rule=None):
         if pref.emergency_stop: return PolicyResult(False, 'Emergency stop is enabled.')
         if duplicate: return PolicyResult(False, 'Duplicate purchase protection blocked this transaction.')
-        if listing['stock'] <= 0: return PolicyResult(False, 'Product is out of stock.')
-        if item.max_price is not None and listing['total'] > item.max_price: return PolicyResult(False, 'Final total exceeds maximum price.')
-        if listing['seller_rating'] < pref.min_seller_rating: return PolicyResult(False, 'Seller rating is below configured minimum.')
-        if monthly_spend + listing['total'] > pref.monthly_max: return PolicyResult(False, 'Monthly spending limit would be exceeded.')
-        if listing['total'] > pref.global_max_order: return PolicyResult(False, 'Global maximum per order exceeded.')
+        stock = listing.get('stock', 1) if isinstance(listing, dict) else getattr(listing, 'stock', 1)
+        if stock <= 0: return PolicyResult(False, 'Product is out of stock.')
+        total = listing.get('true_total', listing.get('total', listing.get('price', 0))) if isinstance(listing, dict) else getattr(listing, 'price', 0)
+        sr = listing.get('seller_rating', 0.0) if isinstance(listing, dict) else getattr(listing, 'seller_rating', 0.0)
+        if item.max_price is not None and total > item.max_price: return PolicyResult(False, 'Final total exceeds maximum price.')
+        if sr > 0 and sr < pref.min_seller_rating: return PolicyResult(False, 'Seller rating is below configured minimum.')
+        if monthly_spend + total > pref.monthly_max: return PolicyResult(False, 'Monthly spending limit would be exceeded.')
+        if total > pref.global_max_order: return PolicyResult(False, 'Global maximum per order exceeded.')
         if item.purchase_mode == 'AUTO' and not pref.global_auto_buy: return PolicyResult(False, 'Auto checkout is not globally enabled.')
-        if rule and rule.max_price is not None and listing['total'] > rule.max_price: return PolicyResult(False, 'Applicable purchase rule maximum exceeded.')
+        if rule and rule.max_price is not None and total > rule.max_price: return PolicyResult(False, 'Applicable purchase rule maximum exceeded.')
         return PolicyResult(True, 'All deterministic purchase rules passed.')

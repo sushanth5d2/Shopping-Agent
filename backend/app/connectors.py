@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse, unquote
 import re, json, ipaddress, socket
 from bs4 import BeautifulSoup
-from .services import normalize_price
+from .services import normalize_price, duckduckgo_search
 from .config import settings
 try:
     from playwright.sync_api import sync_playwright
@@ -61,13 +61,34 @@ def parse_name_from_url(url: str) -> str:
     """Extracts a human-readable product name fallback from the URL slug."""
     try:
         parsed = urlparse(url)
-        path = unquote(parsed.path)
-        # Remove common extension/path noise
-        slug = re.sub(r'(/dp/|/p/|/product/|/item/|[?#].*|\.html?|/[A-Z0-9]{10}.*)', '', path, flags=re.I)
-        parts = [p for p in slug.split('/') if p and not p.isdigit() and len(p) > 2]
-        if parts:
-            clean = re.sub(r'[-_+]', ' ', parts[-1]).strip()
-            if len(clean) > 3:
+        path = unquote(parsed.path).strip('/')
+        # 1. Amazon: /slug-name/dp/ASIN or /dp/ASIN
+        if '/dp/' in path:
+            before_dp = path.split('/dp/')[0]
+            slug = before_dp.split('/')[-1]
+            clean = re.sub(r'[-_+]', ' ', slug).strip()
+            if len(clean) > 3 and not re.match(r'^(dp|gp|product|item)$', clean, re.I):
+                return ' '.join(w.capitalize() for w in clean.split())
+        # 2. Amazon gp: /slug-name/gp/product/ASIN
+        if '/gp/product/' in path:
+            before_gp = path.split('/gp/product/')[0]
+            slug = before_gp.split('/')[-1]
+            clean = re.sub(r'[-_+]', ' ', slug).strip()
+            if len(clean) > 3 and not re.match(r'^(dp|gp|product|item)$', clean, re.I):
+                return ' '.join(w.capitalize() for w in clean.split())
+        # 3. Flipkart: /slug-name/p/itm...
+        if '/p/' in path:
+            before_p = path.split('/p/')[0]
+            slug = before_p.split('/')[-1]
+            clean = re.sub(r'[-_+]', ' ', slug).strip()
+            if len(clean) > 3 and not re.match(r'^(dp|p|product|item)$', clean, re.I):
+                return ' '.join(w.capitalize() for w in clean.split())
+        # 4. General path segments: filter out IDs, extensions, technical keywords
+        segments = [s for s in path.split('/') if s and not re.match(r'^(dp|p|gp|product|item|ref=.*|s|b|[A-Z0-9]{10})$', s, re.I)]
+        for seg in reversed(segments):
+            clean = re.sub(r'[-_+]', ' ', seg).strip()
+            clean = re.sub(r'\.(html?|php|asp|jsp)$', '', clean, flags=re.I).strip()
+            if len(clean) > 3 and not any(k in clean.lower() for k in ['ref=sr', 'qid=', 'sprefix=']):
                 return ' '.join(w.capitalize() for w in clean.split())
     except Exception:
         pass
@@ -125,6 +146,8 @@ class JsonLdWebConnector(StoreConnector):
         # Clean title noise like "Amazon.in: Buy ... online" or "Flipkart.com"
         clean_title = re.sub(r'^(Buy\s+|Amazon\.in\s*:\s*|Flipkart\.com\s*:\s*)', '', title, flags=re.I)
         clean_title = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in|\s*-\s*Myntra).*$', '', clean_title, flags=re.I).strip()
+        if clean_title.lower() in ['amazon.in', 'amazon', 'online shopping site in india', 'flipkart.com', 'flipkart', 'product online', 'home page', '']:
+            clean_title = ''
 
         # 3. Extract JSON-LD Microdata
         data = []
@@ -148,64 +171,50 @@ class JsonLdWebConnector(StoreConnector):
             if h1:
                 name = h1.get_text().strip()
 
-        # Initialize price from JSON-LD early so DuckDuckGo search can fill it if missing
+        # Initialize price from JSON-LD
         price = offers.get('price') if isinstance(offers, dict) else None
 
-        # If direct page was bot-blocked (CAPTCHA or empty title), resolve genuine title via search
-        if not name or name in ['Product Online', 'Amazon.in', 'Online Shopping site in India', '']:
-            # Extract ASIN from full URL (handles both /dp/B0XXXXXXXX and amzn.in redirect)
-            asin_m = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', final_url)
-            if not asin_m:
-                asin_m = re.search(r'\b(B0[A-Z0-9]{8})\b', final_url)
-            asin = asin_m.group(1) if asin_m else ''
-            
-            # Extract product title and price via live DuckDuckGo search
-            try:
-                import httpx
-                from urllib.parse import quote_plus
-                # Use ASIN if available, otherwise use the full URL for search
-                if asin:
-                    q = f"amazon.in {asin}"
-                else:
-                    q = f"amazon.in {final_url.split('/')[-1] if '/' in final_url else final_url}"
-                ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(q)}"
-                ddg_r = httpx.post(ddg_url, headers={'User-Agent': headers['User-Agent']}, data={'q': q}, timeout=8)
-                if ddg_r.status_code == 200:
-                    ddg_soup = BeautifulSoup(ddg_r.text, 'html.parser')
-                    for res in ddg_soup.select('.result'):
-                        t_el = res.select_one('.result__title')
-                        s_el = res.select_one('.result__snippet')
-                        t_text = t_el.get_text().strip() if t_el else ''
-                        s_text = s_el.get_text().strip() if s_el else ''
-                        if t_text and not any(k in t_text.lower() for k in ['order online', 'ad clicks', 'shop online for mobiles', 'customer reviews']):
-                            # Clean title: remove "Amazon.in", "Flipkart", etc.
+        # Resolve slug and ASIN
+        url_slug_name = parse_name_from_url(final_url)
+        if url_slug_name == 'Product Online':
+            url_slug_name = parse_name_from_url(url)
+
+        asin_m = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', final_url) or re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', url)
+        if not asin_m:
+            asin_m = re.search(r'\b(B0[A-Z0-9]{8})\b', final_url) or re.search(r'\b(B0[A-Z0-9]{8})\b', url)
+        asin = asin_m.group(1) if asin_m else ''
+
+        # If direct page was bot-blocked (CAPTCHA or empty title), resolve via DuckDuckGo Lite search
+        if not name or name.lower() in ['product online', 'amazon.in', 'online shopping site in india', 'home page', '']:
+            search_query = f"amazon.in {asin}" if asin else (f"amazon.in {url_slug_name}" if url_slug_name != 'Product Online' else '')
+            if search_query:
+                try:
+                    search_results = duckduckgo_search(search_query, timeout=8)
+                    for res in search_results:
+                        t_text = res.get('title', '')
+                        if t_text and not any(k in t_text.lower() for k in ['order online', 'ad clicks', 'shop online for mobiles', 'customer reviews', 'home page', 'sign in', 'welcome to amazon']):
                             clean_t = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in|\s*-\s*Amazon|\s*Buy\s+).*$', '', t_text, flags=re.I).strip()
                             clean_t = re.sub(r'^(Buy\s+|Amazon\.in\s*:\s*)', '', clean_t, flags=re.I).strip()
-                            if len(clean_t) > 5:
+                            if len(clean_t) > 5 and clean_t.lower() not in ['amazon.in', 'flipkart.com', 'online shopping', 'home page']:
                                 name = clean_t
-                                # Try extracting price from snippet
-                                price_match = re.search(r'(?:₹|Rs\.?|INR)\s*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{2})?|[0-9]{3,7})', s_text)
-                                if price_match and not price:
-                                    price = price_match.group(1)
+                                if res.get('price', 0) > 0 and (price is None or price == 0):
+                                    price = res['price']
                                 break
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-        if not name or name in ['Product Online', 'Amazon.in']:
-            name = clean_title or parse_name_from_url(final_url)
+        if not name or name.lower() in ['product online', 'amazon.in', 'online shopping site in india', 'home page', '']:
+            name = clean_title or (url_slug_name if url_slug_name != 'Product Online' else '')
+        if not name:
+            name = 'Product Online'
 
-        # 5. Extract Price (only if not already found from search above)
-        if price is None:
-            price = offers.get('price') if isinstance(offers, dict) else None
-
+        # 5. Extract Price
         if price is None and soup:
-            # Meta tags
             meta = soup.find('meta', property='product:price:amount') or soup.find('meta', property='og:price:amount') or soup.find('meta', attrs={'itemprop': 'price'})
             if meta:
                 price = meta.get('content')
 
         if price is None and soup:
-            # Amazon / Flipkart / generic specific CSS selectors
             price_elem = (
                 soup.select_one('.a-price .a-offscreen') or
                 soup.select_one('#priceblock_ourprice') or
@@ -219,24 +228,32 @@ class JsonLdWebConnector(StoreConnector):
                 price = price_elem.get('data-price') or price_elem.get_text()
 
         if price is None and soup:
-            # General price regex match
             price_match = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)', soup.get_text()[:15000])
             if price_match:
                 price = price_match.group(1)
 
-        # Fallback price calculation from genuine product name intelligence (never arbitrary 999)
         final_price = normalize_price(price) if price else 0.0
-        observed_live = True
-        if final_price <= 0:
-            final_price = 0.0
-            observed_live = False
+        observed_live = True if final_price > 0 else False
+
+        # Live fallback for price if not extracted directly from page
+        if final_price <= 0 and name != 'Product Online':
+            try:
+                simplified = ' '.join(name.split()[:4])
+                price_results = duckduckgo_search(f'{simplified} price India Flipkart Croma', timeout=6)
+                for pr in price_results:
+                    if pr.get('price', 0) > 0:
+                        final_price = pr['price']
+                        observed_live = True
+                        break
+            except Exception:
+                pass
 
         # 6. Extract Brand / Seller / Stock
         brand_val = prod.get('brand', {}) if isinstance(prod, dict) else {}
         brand = brand_val.get('name', '') if isinstance(brand_val, dict) else str(brand_val or '')
         if not brand:
             first_word = name.split()[0] if name else ''
-            if len(first_word) > 2:
+            if len(first_word) > 2 and first_word.lower() not in ['product', 'online']:
                 brand = first_word
 
         seller_val = (offers.get('seller') or {}) if isinstance(offers, dict) else {}
@@ -256,21 +273,20 @@ class JsonLdWebConnector(StoreConnector):
 
         availability = str(offers.get('availability', '')) if isinstance(offers, dict) else ''
         stock = 0 if 'outofstock' in availability.lower() else 1
-
         sku = str(prod.get('sku') or prod.get('mpn') or '')
 
         return ProductObservation(
-            name=str(name).strip()[:255],
-            brand=brand,
-            model=sku,
-            variant=str(prod.get('color') or prod.get('size') or ''),
-            gtin=str(prod.get('gtin13') or prod.get('gtin12') or prod.get('gtin') or ''),
+            name=str(name).strip()[:500],
+            brand=brand[:255],
+            model=sku[:255] or (name[:255] if name else ''),
+            variant=str(prod.get('color') or prod.get('size') or '')[:255],
+            gtin=str(prod.get('gtin13') or prod.get('gtin12') or prod.get('gtin') or '')[:80],
             price=final_price,
             currency='INR',
             stock=stock,
-            seller=seller_name,
+            seller=seller_name[:255],
             seller_rating=0.0,
-            url=final_url,
+            url=final_url[:2000],
             observed_live=observed_live
         )
 

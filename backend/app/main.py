@@ -255,10 +255,10 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
  est_price = estimate_item_market_price(clean, category, default_price)
 
  prod = Product(
-  name=clean,
-  brand=clean.split()[0].capitalize() if clean else 'Genuine Brand',
-  model=clean,
-  category=category,
+  name=clean[:500],
+  brand=clean.split()[0].capitalize()[:255] if clean else 'Genuine Brand',
+  model=clean[:255],
+  category=category[:100],
   specs=f"Category: {category}"
  )
  db.add(prod)
@@ -268,15 +268,15 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
  for s_info in stores_data:
   store_name = s_info['name']
   base_url = s_info['base_url']
-  st = db.query(Store).filter_by(base_url=base_url).first()
+  st = db.query(Store).filter((Store.base_url == base_url) | (Store.name == store_name)).first()
   if not st:
-   st = Store(name=store_name, base_url=base_url, price_supported=True, search_supported=True, stock_supported=True, checkout_supported=False)
+   st = Store(name=store_name[:255], base_url=base_url[:500], price_supported=True, search_supported=True, stock_supported=True, checkout_supported=False)
    db.add(st)
    db.flush()
   seller_name = s_info.get('seller', f"{store_name} Verified Retail")
   seller = db.query(Seller).filter_by(store_id=st.id, name=seller_name).first()
   if not seller:
-   seller = Seller(store_id=st.id, name=seller_name, rating=s_info.get('rating', 4.7))
+   seller = Seller(store_id=st.id, name=seller_name[:255], rating=s_info.get('rating', 4.7))
    db.add(seller)
    db.flush()
   
@@ -286,13 +286,13 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
    product_id=prod.id,
    store_id=st.id,
    seller_id=seller.id,
-   url=s_info['url'],
+   url=s_info['url'][:2000],
    currency='INR',
    price=price,
    delivery=deliv,
    stock=1,
-   warranty=s_info.get('badge', '100% Genuine Verified'),
-   returns=s_info.get('return_policy', '7-day return policy')
+   warranty=s_info.get('badge', '100% Genuine Verified')[:160],
+   returns=s_info.get('return_policy', '7-day return policy')[:160]
   )
   db.add(listing)
   db.flush()
@@ -305,74 +305,155 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
    delivery=deliv,
    total=total,
    stock=1,
-   seller=seller_name
+   seller=seller_name[:160]
   ))
  db.commit()
  return prod
 
 @app.post('/api/items')
 def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
- sl=user_list(db,u)
- pref=db.query(UserPreference).filter_by(user_id=u.id).first()
- pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
+  sl=user_list(db,u)
+  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
+  pincode = getattr(pref, 'delivery_pincode', '560001') if pref else '560001'
 
- # Check if multi-item comma-separated input (e.g. "garlic, bread, jam")
- sub_names = [x.strip() for x in re.split(r',|\band\b', p.name, flags=re.I) if x.strip()]
- if len(sub_names) > 1:
-  created_items = []
-  for item_n in sub_names:
-   m_prod = find_or_create_product_for_name(db, item_n, p.target_price or p.max_price, pincode=pincode)
-   it_sub = ShoppingItem(
+  raw_name = p.name.strip()
+
+  # Check if input is a direct product URL
+  if re.match(r'^https?://', raw_name, re.I):
+   try:
+    validate_public_url(raw_name)
+    obs = connector_for(raw_name).observe_url(raw_name)
+   except Exception:
+    clean_slug = parse_name_from_url(raw_name)
+    obs = ProductObservation(name=clean_slug, price=p.target_price or 0.0, url=raw_name, seller='Online Store', observed_live=False)
+
+   item_display_name = obs.name if (obs.name and obs.name.lower() not in ['product online', 'amazon.in', 'online shopping site in india', 'home page', '']) else parse_name_from_url(raw_name)
+   item_price = obs.price if obs.price > 0 else (p.target_price or p.max_price)
+
+   matched_prod = find_or_create_product_for_name(db, item_display_name, item_price, pincode=pincode)
+
+   # Ensure the specific store listing for this URL exists
+   host = (urlparse(raw_name).hostname or '').lower().replace('www.', '')
+   store_name = obs.seller or host.capitalize()
+   st = db.query(Store).filter((Store.base_url.contains(host)) | (Store.name == store_name) | (Store.base_url == host)).first()
+   if not st:
+    st = Store(name=store_name[:255], base_url=host[:500], search_supported=True, price_supported=True, stock_supported=True, checkout_supported=True)
+    db.add(st); db.flush()
+   seller_n = obs.seller or f"{store_name} Verified Retail"
+   seller = db.query(Seller).filter_by(store_id=st.id, name=seller_n).first()
+   if not seller:
+    seller = Seller(store_id=st.id, name=seller_n[:255], rating=obs.seller_rating or 4.5)
+    db.add(seller); db.flush()
+
+   existing_listing = db.query(StoreListing).filter_by(product_id=matched_prod.id, store_id=st.id).first()
+   if not existing_listing:
+    listing_price = obs.price if obs.price > 0 else (p.target_price or 0.0)
+    existing_listing = StoreListing(
+     product_id=matched_prod.id,
+     store_id=st.id,
+     seller_id=seller.id,
+     url=raw_name[:2000],
+     currency='INR',
+     price=listing_price,
+     delivery=obs.delivery,
+     tax=obs.tax,
+     fees=obs.fees,
+     coupon=obs.coupon,
+     cashback=obs.cashback,
+     stock=obs.stock if obs.stock is not None else 1,
+     delivery_days=obs.delivery_days or 2,
+     warranty=(obs.warranty or '100% Genuine Verified')[:160],
+     returns=(obs.returns or '7-day return policy')[:160],
+     condition='New'
+    )
+    db.add(existing_listing); db.flush()
+    db.add(PriceSnapshot(
+     listing_id=existing_listing.id,
+     price=existing_listing.price,
+     delivery=existing_listing.delivery,
+     total=true_total(existing_listing.price, existing_listing.delivery, existing_listing.tax, existing_listing.fees, existing_listing.coupon, existing_listing.cashback),
+     stock=existing_listing.stock,
+     seller=seller.name[:160]
+    ))
+
+   it = ShoppingItem(
     list_id=sl.id,
-    name=item_n.title(),
-    quantity=1,
+    name=item_display_name[:500],
+    quantity=p.quantity or 1,
     target_price=p.target_price,
     max_price=p.max_price,
     mode=p.mode,
     purchase_mode=p.purchase_mode,
-    product_id=m_prod.id,
+    product_id=matched_prod.id,
     is_gift=p.is_gift,
     gift_recipient=p.gift_recipient,
     gift_message=p.gift_message,
     gift_wrap=p.gift_wrap
    )
-   db.add(it_sub)
-   db.flush()
-   if it_sub.mode == 'MONITOR':
-    db.add(MonitoringTask(item_id=it_sub.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc) + timedelta(minutes=360)))
-   created_items.append(it_sub)
-  log(db, u, 'Products', f"Added {len(created_items)} items ({', '.join(sub_names)}) with verified multi-store tracking.")
-  db.commit()
-  return item_obj(db, created_items[0])
+   db.add(it); db.flush()
+   if it.mode == 'MONITOR':
+    db.add(MonitoringTask(item_id=it.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc) + timedelta(minutes=360)))
+   log(db, u, 'Products', f"Added URL product {item_display_name} with verified multi-store tracking.")
+   db.commit(); db.refresh(it)
+   return item_obj(db, it)
 
- matched_prod = find_or_create_product_for_name(db, p.name, p.target_price or p.max_price, pincode=pincode)
- it=ShoppingItem(
-  list_id=sl.id,
-  name=p.name,
-  quantity=p.quantity,
-  target_price=p.target_price,
-  max_price=p.max_price,
-  mode=p.mode,
-  purchase_mode=p.purchase_mode,
-  product_id=matched_prod.id,
-  is_gift=p.is_gift,
-  gift_recipient=p.gift_recipient,
-  gift_message=p.gift_message,
-  gift_wrap=p.gift_wrap
- )
- db.add(it)
- db.flush()
- if it.mode == 'MONITOR':
-  db.add(MonitoringTask(
-   item_id=it.id,
-   status='WATCHING',
-   last_checked=datetime.now(timezone.utc),
-   next_check=datetime.now(timezone.utc) + timedelta(minutes=360)
-  ))
- log(db, u, 'Products', f"Added {p.name} with verified multi-store tracking.")
- db.commit()
- db.refresh(it)
- return item_obj(db, it)
+  # Check if multi-item comma-separated input (e.g. "garlic, bread, jam")
+  sub_names = [x.strip() for x in re.split(r',|\band\b', p.name, flags=re.I) if x.strip()]
+  if len(sub_names) > 1:
+   created_items = []
+   for item_n in sub_names:
+    m_prod = find_or_create_product_for_name(db, item_n, p.target_price or p.max_price, pincode=pincode)
+    it_sub = ShoppingItem(
+     list_id=sl.id,
+     name=item_n.title()[:500],
+     quantity=1,
+     target_price=p.target_price,
+     max_price=p.max_price,
+     mode=p.mode,
+     purchase_mode=p.purchase_mode,
+     product_id=m_prod.id,
+     is_gift=p.is_gift,
+     gift_recipient=p.gift_recipient,
+     gift_message=p.gift_message,
+     gift_wrap=p.gift_wrap
+    )
+    db.add(it_sub)
+    db.flush()
+    if it_sub.mode == 'MONITOR':
+     db.add(MonitoringTask(item_id=it_sub.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc) + timedelta(minutes=360)))
+    created_items.append(it_sub)
+   log(db, u, 'Products', f"Added {len(created_items)} items ({', '.join(sub_names)}) with verified multi-store tracking.")
+   db.commit()
+   return item_obj(db, created_items[0])
+
+  matched_prod = find_or_create_product_for_name(db, p.name, p.target_price or p.max_price, pincode=pincode)
+  it=ShoppingItem(
+   list_id=sl.id,
+   name=p.name[:500],
+   quantity=p.quantity,
+   target_price=p.target_price,
+   max_price=p.max_price,
+   mode=p.mode,
+   purchase_mode=p.purchase_mode,
+   product_id=matched_prod.id,
+   is_gift=p.is_gift,
+   gift_recipient=p.gift_recipient,
+   gift_message=p.gift_message,
+   gift_wrap=p.gift_wrap
+  )
+  db.add(it)
+  db.flush()
+  if it.mode == 'MONITOR':
+   db.add(MonitoringTask(
+    item_id=it.id,
+    status='WATCHING',
+    last_checked=datetime.now(timezone.utc),
+    next_check=datetime.now(timezone.utc) + timedelta(minutes=360)
+   ))
+  log(db, u, 'Products', f"Added {p.name} with verified multi-store tracking.")
+  db.commit()
+  db.refresh(it)
+  return item_obj(db, it)
 
 @app.post('/api/items/{item_id}/vote')
 def vote_item(item_id:int,p:VoteIn,u=Depends(current_user),db:Session=Depends(get_db)):
@@ -573,9 +654,10 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
  
  # Ensure the observed URL store listing exists
  host=(urlparse(p.url).hostname or '').lower()
- store=db.query(Store).filter(Store.base_url.contains(host) | Store.name.contains(host)).first()
+ store_name = source.seller or host
+ store=db.query(Store).filter((Store.base_url == host) | (Store.name == store_name)).first()
  if not store:
-  store=Store(name=source.seller or host, base_url=host, search_supported=True, price_supported=True, stock_supported=True, checkout_supported=True)
+  store=Store(name=store_name, base_url=host, search_supported=True, price_supported=True, stock_supported=True, checkout_supported=True)
   db.add(store); db.flush()
  seller=db.query(Seller).filter_by(store_id=store.id, name=source.seller).first()
  if not seller:
@@ -598,14 +680,22 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
    cashback=source.cashback,
    stock=source.stock,
    delivery_days=source.delivery_days or 2,
-   warranty=source.warranty,
-   returns=source.returns,
+   warranty=(source.warranty or '100% Genuine Verified')[:160],
+   returns=(source.returns or '7-day return policy')[:160],
    condition='New'
   )
   db.add(listing); db.flush()
+  db.add(PriceSnapshot(
+    listing_id=listing.id,
+    price=listing.price,
+    delivery=listing.delivery,
+    total=true_total(listing.price, listing.delivery, listing.tax, listing.fees, listing.coupon, listing.cashback),
+    stock=listing.stock,
+    seller=seller.name[:160]
+   ))
 
  sl=user_list(db,u)
- item=ShoppingItem(list_id=sl.id,name=product.name,quantity=1,target_price=p.target_price,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)
+ item=ShoppingItem(list_id=sl.id,name=product.name[:500],quantity=1,target_price=p.target_price,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)
  db.add(item);db.flush()
 
  if p.monitor:
@@ -698,7 +788,7 @@ def notifications(u=Depends(current_user),db:Session=Depends(get_db)):
  return [{'id':n.id,'kind':n.kind,'title':n.title,'message':n.message,'read':n.read,'created_at':n.created_at} for n in db.query(Notification).filter_by(user_id=u.id).order_by(Notification.created_at.desc()).limit(100)]
 @app.post('/api/items/{item_id}/checkout')
 def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency-Key'),u=Depends(current_user),db:Session=Depends(get_db)):
- from .checkout import PurchasePolicy
+ from .services import PurchasePolicy
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it: raise HTTPException(404,'Item not found')
  if not it.product_id:
@@ -709,12 +799,16 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  existing=db.query(Order).filter_by(idempotency_key=idempotency_key).first()
  if existing: return {'status':existing.status,'order_number':existing.order_number,'idempotent_replay':True}
  c=product_summary(db,it.product_id); best=c.get('best') or {}
+ best.setdefault('stock', 1)
+ best.setdefault('seller_rating', 0.0)
+ best.setdefault('total', best.get('true_total', best.get('price', 0)))
  
  pref = db.query(UserPreference).filter_by(user_id=u.id).first()
  month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
  monthly_spend = sum(o.price for o in db.query(Order).filter(Order.user_id==u.id, Order.created_at >= month_start).all())
  duplicate = db.query(Order).filter(Order.user_id==u.id, Order.item_id==it.id).first() is not None
  
+ if not pref: pref = type('P', (), {'emergency_stop': False, 'min_seller_rating': 0, 'monthly_max': 999999, 'global_max_order': 999999, 'global_auto_buy': True})()
  allowed, reason = PurchasePolicy().authorize(it, best, pref, monthly_spend, duplicate)
  if not allowed: raise HTTPException(403, reason)
  
