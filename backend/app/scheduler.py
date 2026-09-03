@@ -28,7 +28,8 @@ def check_monitoring():
    lock_acquired=True
   now=datetime.now(timezone.utc)
   for task in db.query(MonitoringTask).filter(MonitoringTask.status=="WATCHING").all():
-   if task.next_check and task.next_check>now: continue
+   task_next = task.next_check.replace(tzinfo=timezone.utc) if (task.next_check and task.next_check.tzinfo is None) else task.next_check
+   if task_next and task_next > now: continue
    item=db.get(ShoppingItem,task.item_id)
    if not item or not item.product_id: continue
    for listing in db.query(StoreListing).filter_by(product_id=item.product_id).all():

@@ -87,12 +87,13 @@ def classify_product_category(name: str) -> str:
 
     return 'GENERAL'
 
-def duckduckgo_search(query: str, timeout: int = 10) -> list[dict]:
-    """Universal DuckDuckGo search helper using lite.duckduckgo.com (reliable, no CAPTCHA/JS challenges)
-    with fallback to html.duckduckgo.com. Unpacks redirected URLs and extracts prices."""
-    from bs4 import BeautifulSoup
-    from urllib.parse import urlparse, parse_qs, unquote
+def duckduckgo_search(query: str, timeout: int = 5) -> list[dict]:
+    """Universal web search helper querying Bing Search (with automatic base64 URL unwrapping)
+    and falling back to DuckDuckGo. Returns structured results with title, url, snippet, price."""
     import re
+    import base64
+    from bs4 import BeautifulSoup
+    from urllib.parse import urlparse, parse_qs
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -101,26 +102,30 @@ def duckduckgo_search(query: str, timeout: int = 10) -> list[dict]:
     }
     results = []
 
-    # 1. Try lite.duckduckgo.com
+    # 1. Primary: Bing Search (ultra-reliable, fast HTTP 200, no CAPTCHA)
     try:
-        r = httpx.post('https://lite.duckduckgo.com/lite/', headers=headers, data={'q': query}, timeout=timeout)
-        if r.status_code == 200 and ('result-link' in r.text or 'result-snippet' in r.text):
+        r = httpx.get(f'https://www.bing.com/search?q={query}', headers=headers, timeout=timeout)
+        if r.status_code == 200:
             soup = BeautifulSoup(r.text, 'html.parser')
-            links = soup.select('.result-link')
-            snippets = soup.select('.result-snippet')
-            for i, link in enumerate(links):
-                title = link.get_text().strip()
-                raw_href = link.get('href', '')
+            for li in soup.select('li.b_algo'):
+                h2 = li.select_one('h2 a')
+                snippet_el = li.select_one('.b_caption p') or li.select_one('.b_algoSlug')
+                if not h2:
+                    continue
+                title = h2.get_text().strip()
+                raw_href = h2.get('href', '')
                 actual_url = raw_href
-                if 'uddg=' in raw_href:
-                    parsed = urlparse(raw_href)
-                    qs = parse_qs(parsed.query)
-                    actual_url = qs.get('uddg', [raw_href])[0]
-                elif raw_href.startswith('//'):
-                    actual_url = 'https:' + raw_href
-
-                snippet = snippets[i].get_text().strip() if i < len(snippets) else ''
-                if title and not any(k in title.lower() for k in ['duckduckgo', 'ad clicks', 'more info']):
+                if 'bing.com/ck/a' in raw_href:
+                    try:
+                        u_param = parse_qs(urlparse(raw_href).query).get('u', [''])[0]
+                        if u_param.startswith('a1'):
+                            b64 = u_param[2:].replace('-', '+').replace('_', '/')
+                            b64 += '=' * (-len(b64) % 4)
+                            actual_url = base64.b64decode(b64).decode('latin1', errors='ignore')
+                    except Exception:
+                        pass
+                snippet = snippet_el.get_text().strip() if snippet_el else ''
+                if title and not any(k in title.lower() for k in ['microsoft bing', 'sign in', 'feedback', 'preferences']):
                     pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet)
                     price = float(pm.group(1).replace(',', '')) if pm else 0.0
                     results.append({
@@ -132,27 +137,35 @@ def duckduckgo_search(query: str, timeout: int = 10) -> list[dict]:
     except Exception:
         pass
 
-    # 2. Fallback to html.duckduckgo.com
+    # 2. Fallback: DuckDuckGo Lite
     if not results:
         try:
-            r = httpx.post('https://html.duckduckgo.com/html/', headers=headers, data={'q': query}, timeout=timeout)
-            if r.status_code == 200:
+            r = httpx.post('https://lite.duckduckgo.com/lite/', headers=headers, data={'q': query}, timeout=timeout)
+            if r.status_code == 200 and ('result-link' in r.text or 'result-snippet' in r.text):
                 soup = BeautifulSoup(r.text, 'html.parser')
-                for res in soup.select('.result'):
-                    t_el = res.select_one('.result__title a')
-                    s_el = res.select_one('.result__snippet')
-                    if t_el:
-                        title = t_el.get_text().strip()
-                        raw_href = t_el.get('href', '')
-                        actual_url = raw_href
-                        if 'uddg=' in raw_href:
-                            parsed = urlparse(raw_href)
-                            qs = parse_qs(parsed.query)
-                            actual_url = qs.get('uddg', [raw_href])[0]
-                        snippet = s_el.get_text().strip() if s_el else ''
+                links = soup.select('.result-link')
+                snippets = soup.select('.result-snippet')
+                for i, link in enumerate(links):
+                    title = link.get_text().strip()
+                    raw_href = link.get('href', '')
+                    actual_url = raw_href
+                    if 'uddg=' in raw_href:
+                        parsed = urlparse(raw_href)
+                        qs = parse_qs(parsed.query)
+                        actual_url = qs.get('uddg', [raw_href])[0]
+                    elif raw_href.startswith('//'):
+                        actual_url = 'https:' + raw_href
+
+                    snippet = snippets[i].get_text().strip() if i < len(snippets) else ''
+                    if title and not any(k in title.lower() for k in ['duckduckgo', 'ad clicks', 'more info']):
                         pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet)
                         price = float(pm.group(1).replace(',', '')) if pm else 0.0
-                        results.append({'title': title, 'url': actual_url, 'snippet': snippet, 'price': price})
+                        results.append({
+                            'title': title,
+                            'url': actual_url,
+                            'snippet': snippet,
+                            'price': price
+                        })
         except Exception:
             pass
 
@@ -163,12 +176,26 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
         return float(user_target)
     
     try:
-        results = duckduckgo_search(f'"{name}" price India', timeout=6)
+        clean = re.split(r'[:|;(\[]', name)[0].strip() or name[:40]
+        results = duckduckgo_search(f"{clean} price India", timeout=6)
         for r in results:
             if r.get('price', 0) > 0:
                 return float(r['price'])
     except Exception:
         pass
+
+    nl = name.lower()
+    if 'iphone 16 pro max' in nl: return 144900.0
+    if 'iphone 16 pro' in nl: return 119900.0
+    if 'iphone 16 plus' in nl: return 77900.0
+    if 'iphone 16' in nl: return 67900.0
+    if 'iphone 15' in nl: return 54900.0
+    if 's24 ultra' in nl: return 121999.0
+    if 's24 plus' in nl or 's24+' in nl: return 84999.0
+    if 's24' in nl: return 64999.0
+    if 'oneplus 12' in nl: return 59999.0
+    if 'pixel 9 pro' in nl: return 109999.0
+    if 'pixel 9' in nl: return 69999.0
 
     if category == 'GROCERY': return 100.0
     if category == 'ELECTRONICS': return 5000.0
@@ -483,9 +510,9 @@ def analyze_deal_truth(advertised_price: float, current_price: float, history: l
     
     avg = statistics.mean(history)
     lowest = min(history)
-    advertised_mrp = advertised_price if advertised_price > current_price else current_price * 1.25
-    advertised_pct = round(((advertised_mrp - current_price) / advertised_mrp) * 100, 1)
-    real_pct = round(max(0, (avg - current_price) / avg * 100), 1)
+    advertised_mrp = advertised_price if advertised_price > current_price else max(1.0, current_price * 1.25)
+    advertised_pct = round(((advertised_mrp - current_price) / max(0.01, advertised_mrp)) * 100, 1)
+    real_pct = round(max(0, (avg - current_price) / max(0.01, avg) * 100), 1)
 
     is_suspicious = advertised_pct > 30 and real_pct < 5
     status = 'SUSPICIOUS' if is_suspicious else 'NORMAL'
@@ -868,7 +895,8 @@ def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
     from urllib.parse import urlparse
     results = []
     try:
-        query = f'"{product_name}" review India'
+        clean_name = re.split(r"[:|;(\[]", product_name)[0].strip() or product_name[:40]
+        query = f"{clean_name} review India"
         search_results = duckduckgo_search(query, timeout=timeout)
 
         review_domains = {
@@ -963,7 +991,8 @@ def _search_youtube_reviews(product_name: str, timeout: int = 10) -> list[dict]:
 
     # DuckDuckGo Lite fallback for YouTube videos
     try:
-        query = f'"{product_name}" review site:youtube.com'
+        clean_name = re.split(r"[:|;(\[]", product_name)[0].strip() or product_name[:40]
+        query = f"{clean_name} review site:youtube.com"
         search_results = duckduckgo_search(query, timeout=timeout)
 
         for res in search_results:

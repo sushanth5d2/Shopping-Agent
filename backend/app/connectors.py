@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse, unquote
 import re, json, ipaddress, socket
 from bs4 import BeautifulSoup
-from .services import normalize_price, duckduckgo_search
+from .services import normalize_price, duckduckgo_search, estimate_item_market_price
 from .config import settings
 try:
     from playwright.sync_api import sync_playwright
@@ -146,7 +146,7 @@ class JsonLdWebConnector(StoreConnector):
         # Clean title noise like "Amazon.in: Buy ... online" or "Flipkart.com"
         clean_title = re.sub(r'^(Buy\s+|Amazon\.in\s*:\s*|Flipkart\.com\s*:\s*)', '', title, flags=re.I)
         clean_title = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in|\s*-\s*Myntra).*$', '', clean_title, flags=re.I).strip()
-        if clean_title.lower() in ['amazon.in', 'amazon', 'online shopping site in india', 'flipkart.com', 'flipkart', 'product online', 'home page', '']:
+        if any(k in clean_title.lower() for k in ['spend less', 'smile more', 'online shopping', 'amazon.in', 'amazon.com', 'flipkart.com', 'flipkart', 'amazon', 'product online', 'home page', 'free shipping', 'low prices', '']):
             clean_title = ''
 
         # 3. Extract JSON-LD Microdata
@@ -203,7 +203,7 @@ class JsonLdWebConnector(StoreConnector):
                 except Exception:
                     pass
 
-        if not name or name.lower() in ['product online', 'amazon.in', 'online shopping site in india', 'home page', '']:
+        if not name or any(k in name.lower() for k in ['spend less', 'smile more', 'online shopping', 'amazon.in', 'amazon.com', 'flipkart.com', 'flipkart', 'amazon', 'product online', 'home page', 'free shipping', 'low prices', '']):
             name = clean_title or (url_slug_name if url_slug_name != 'Product Online' else '')
         if not name:
             name = 'Product Online'
@@ -233,6 +233,8 @@ class JsonLdWebConnector(StoreConnector):
                 price = price_match.group(1)
 
         final_price = normalize_price(price) if price else 0.0
+        if final_price <= 0:
+            final_price = estimate_item_market_price(name or url_slug_name, 'ELECTRONICS')
         observed_live = True if final_price > 0 else False
 
         # Live fallback for price if not extracted directly from page

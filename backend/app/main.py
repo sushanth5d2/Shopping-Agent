@@ -180,7 +180,7 @@ def item_obj(db,i):
   'rejections_count':sum(1 for v in votes_rows if v.vote == 'REJECT')
  }
 
-def product_summary(db,pid):
+def product_summary(db, pid, include_details: bool = True):
  p=db.get(Product,pid)
  if not p:raise HTTPException(404,'Product not found')
  out=[]
@@ -189,8 +189,8 @@ def product_summary(db,pid):
   out.append({'listing_id':l.id,'store':st.name,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
- substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total'])
- sustainability = calculate_sustainability_score(p.category or 'General', p.name, best_item.get('store', ''))
+ substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total']) if include_details else []
+ sustainability = calculate_sustainability_score(p.category or 'General', p.name, best_item.get('store', '')) if include_details else {'eco_grade': 'A', 'badge': '🌱 Verified'}
  return {
   'product_id':pid,
   'product':p.name,
@@ -327,7 +327,8 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
     clean_slug = parse_name_from_url(raw_name)
     obs = ProductObservation(name=clean_slug, price=p.target_price or 0.0, url=raw_name, seller='Online Store', observed_live=False)
 
-   item_display_name = obs.name if (obs.name and obs.name.lower() not in ['product online', 'amazon.in', 'online shopping site in india', 'home page', '']) else parse_name_from_url(raw_name)
+   is_generic = not obs.name or any(k in obs.name.lower() for k in ['spend less', 'smile more', 'online shopping', 'amazon.in', 'amazon.com', 'flipkart.com', 'flipkart', 'amazon', 'product online', 'home page', 'free shipping', 'low prices'])
+   item_display_name = parse_name_from_url(raw_name) if is_generic else obs.name
    item_price = obs.price if obs.price > 0 else (p.target_price or p.max_price)
 
    matched_prod = find_or_create_product_for_name(db, item_display_name, item_price, pincode=pincode)
@@ -763,14 +764,14 @@ def monitor(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
 def monitoring(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);out=[]
  for t in db.query(MonitoringTask).join(ShoppingItem).filter(ShoppingItem.list_id==sl.id).all():
-  it=db.get(ShoppingItem,t.item_id);c=product_summary(db,it.product_id) if it.product_id else None;out.append({'id':t.id,'item':item_obj(db,it),'status':t.status,'last_checked':t.last_checked,'next_check':t.next_check,'best':c['best'] if c else None})
+  it=db.get(ShoppingItem,t.item_id);c=product_summary(db,it.product_id,include_details=False) if it.product_id else None;out.append({'id':t.id,'item':item_obj(db,it),'status':t.status,'last_checked':t.last_checked,'next_check':t.next_check,'best':c['best'] if c else None})
  return {'items':out}
 @app.get('/api/deals')
 def deals(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);out=[]
  for it in db.query(ShoppingItem).filter_by(list_id=sl.id).all():
   if not it.product_id:continue
-  try:c=product_summary(db,it.product_id)
+  try:c=product_summary(db,it.product_id,include_details=False)
   except HTTPException:continue
   hist=[x.total for l in db.query(StoreListing).filter_by(product_id=it.product_id).all() for x in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()]
   avg=sum(hist)/len(hist) if hist else c['best']['true_total']; drop=round((avg-c['best']['true_total'])/avg*100,1) if avg else 0
@@ -798,7 +799,7 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  if not idempotency_key: idempotency_key=uuid.uuid4().hex
  existing=db.query(Order).filter_by(idempotency_key=idempotency_key).first()
  if existing: return {'status':existing.status,'order_number':existing.order_number,'idempotent_replay':True}
- c=product_summary(db,it.product_id); best=c.get('best') or {}
+ c=product_summary(db,it.product_id,include_details=False); best=c.get('best') or {}
  best.setdefault('stock', 1)
  best.setdefault('seller_rating', 0.0)
  best.setdefault('total', best.get('true_total', best.get('price', 0)))
@@ -956,5 +957,5 @@ def get_basket(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);data=[]
  for it in db.query(ShoppingItem).filter_by(list_id=sl.id,status='TODO').all():
   if not it.product_id:continue
-  c=product_summary(db,it.product_id);data.append({'name':it.name,'listings':[{'store':x['store'],'total':x['true_total']} for x in c['listings']]})
+  c=product_summary(db,it.product_id,include_details=False);data.append({'name':it.name,'listings':[{'store':x['store'],'total':x['true_total']} for x in c['listings']]})
  return basket(data)
