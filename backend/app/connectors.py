@@ -104,34 +104,46 @@ class JsonLdWebConnector(StoreConnector):
         title = ''
 
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
             'Upgrade-Insecure-Requests': '1',
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
         }
 
+        # Clean URL to avoid tracking / bot triggers
+        clean_req_url = re.sub(r'([?&])ref=[^&]*', '', url).rstrip('?&')
+        asin_m = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', url) or re.search(r'\b(B0[A-Z0-9]{8})\b', url)
+        asin = asin_m.group(1) if asin_m else ''
+
         # 1. Fast HTTP fetch with redirect resolution
         try:
             import httpx
-            with httpx.Client(timeout=12.0, follow_redirects=True, headers=headers) as client:
-                r = client.get(url)
+            with httpx.Client(timeout=15.0, follow_redirects=True, headers=headers) as client:
+                r = client.get(clean_req_url)
                 final_url = str(r.url)
-                if r.status_code == 200:
+                if r.status_code == 200 and len(r.text) > 8000:
                     html = r.text
+                elif asin and 'amazon' in url.lower():
+                    # Retry with direct canonical ASIN URL
+                    dp_url = f"https://www.amazon.in/dp/{asin}"
+                    r_dp = client.get(dp_url)
+                    if r_dp.status_code == 200 and len(r_dp.text) > 8000:
+                        html = r_dp.text
+                        final_url = dp_url
         except Exception:
             html = ''
 
         # 2. Try Playwright if available and HTML was empty/blocked
-        if (not html or len(html) < 400) and sync_playwright:
+        if (not html or len(html) < 8000) and sync_playwright:
             try:
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=settings.playwright_headless)
                     context = browser.new_context(user_agent=headers['User-Agent'])
                     page = context.new_page()
-                    page.goto(url, wait_until='domcontentloaded', timeout=min(settings.url_fetch_timeout, 15000))
+                    page.goto(clean_req_url, wait_until='domcontentloaded', timeout=min(settings.url_fetch_timeout, 15000))
                     page.wait_for_timeout(600)
                     html = page.content()
                     title = page.title()
@@ -203,7 +215,8 @@ class JsonLdWebConnector(StoreConnector):
                 except Exception:
                     pass
 
-        if not name or any(k in name.lower() for k in ['spend less', 'smile more', 'online shopping', 'amazon.in', 'amazon.com', 'flipkart.com', 'flipkart', 'amazon', 'product online', 'home page', 'free shipping', 'low prices', '']):
+        generic_phrases = ['spend less', 'smile more', 'online shopping', 'amazon.in', 'amazon.com', 'flipkart.com', 'product online', 'home page', 'free shipping', 'low prices']
+        if not name or any(k in name.lower() for k in generic_phrases) or name.strip().lower() in ['amazon', 'flipkart']:
             name = clean_title or (url_slug_name if url_slug_name != 'Product Online' else '')
         if not name:
             name = 'Product Online'

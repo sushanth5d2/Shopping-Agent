@@ -44,6 +44,20 @@ app.add_middleware(
 
 from fastapi.responses import JSONResponse
 
+def canonical_store_name(raw: str) -> str:
+    r = (raw or '').lower()
+    if 'amazon' in r: return 'Amazon India'
+    if 'flipkart' in r: return 'Flipkart'
+    if 'croma' in r: return 'Croma'
+    if 'vijay' in r: return 'Vijay Sales'
+    if 'reliance' in r: return 'Reliance Digital'
+    if 'bajaj' in r: return 'Bajaj Electronics'
+    if 'samsung' in r: return 'Samsung Store India'
+    if 'apple' in r: return 'Apple Store India'
+    if 'oneplus' in r: return 'OnePlus Official Store'
+    if 'sony' in r: return 'Sony Center India'
+    return (raw or 'Online Retailer').strip().title()
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
@@ -188,13 +202,13 @@ def product_summary(db, pid, include_details: bool = True):
  for l in db.query(StoreListing).filter_by(product_id=pid).order_by(StoreListing.price.asc()).all():
   st=db.get(Store,l.store_id)
   if not st: continue
-  s_norm = st.name.strip().lower()
-  if s_norm in seen_stores: continue
-  if any(b in (st.base_url or '').lower() or b in s_norm for b in ['wikipedia', 'merriam', 'alternativeto', 'quora', 'reddit', 'support.apple', 'en']):
+  s_canon = canonical_store_name(st.name)
+  if s_canon in seen_stores: continue
+  if any(b in (st.base_url or '').lower() or b in s_canon.lower() for b in ['wikipedia', 'merriam', 'alternativeto', 'quora', 'reddit', 'support.apple', 'en']):
    continue
-  seen_stores.add(s_norm)
+  seen_stores.add(s_canon)
   seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
-  out.append({'listing_id':l.id,'store':st.name,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(st.name,l.price)})
+  out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price)})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
  substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total']) if include_details else []
@@ -343,8 +357,8 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
 
    # Ensure the specific store listing for this URL exists
    host = (urlparse(raw_name).hostname or '').lower().replace('www.', '')
-   store_name = obs.seller or host.capitalize()
-   st = db.query(Store).filter((Store.base_url.contains(host)) | (Store.name == store_name) | (Store.base_url == host)).first()
+   store_name = canonical_store_name(obs.seller or host)
+   st = db.query(Store).filter((Store.name == store_name) | (Store.base_url.contains(host)) | (Store.base_url == host)).first()
    if not st:
     st = Store(name=store_name[:255], base_url=host[:500], search_supported=True, price_supported=True, stock_supported=True, checkout_supported=True)
     db.add(st); db.flush()
@@ -376,6 +390,19 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
      condition='New'
     )
     db.add(existing_listing); db.flush()
+    db.add(PriceSnapshot(
+     listing_id=existing_listing.id,
+     price=existing_listing.price,
+     delivery=existing_listing.delivery,
+     total=true_total(existing_listing.price, existing_listing.delivery, existing_listing.tax, existing_listing.fees, existing_listing.coupon, existing_listing.cashback),
+     stock=existing_listing.stock,
+     seller=seller.name[:160]
+    ))
+   else:
+    if obs.price > 0:
+     existing_listing.price = obs.price
+    existing_listing.url = raw_name[:2000]
+    existing_listing.observed_at = datetime.now(timezone.utc)
     db.add(PriceSnapshot(
      listing_id=existing_listing.id,
      price=existing_listing.price,
