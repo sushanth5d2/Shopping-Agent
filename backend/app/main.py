@@ -21,10 +21,12 @@ from .seed import seed_data, seed_user_defaults
 async def lifespan(app: FastAPI):
     from .db import init_db, SessionLocal
     from .seed import seed_data
+    from .models import Product
     if init_db():
         db = SessionLocal()
         try:
-            seed_data(db)
+            if db.query(Product).count() == 0:
+                seed_data(db)
         finally:
             db.close()
     yield
@@ -257,12 +259,12 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
   brand=clean.split()[0].capitalize() if clean else 'Genuine Brand',
   model=clean,
   category=category,
-  specs=f"Category: {category} | Verified Retail DNA Specification"
+  specs=f"Category: {category}"
  )
  db.add(prod)
  db.flush()
 
- stores_data = get_stores_for_category(category, clean, est_price, pincode)
+ stores_data = search_live_stores(category, clean, est_price, pincode)
  for s_info in stores_data:
   store_name = s_info['name']
   base_url = s_info['base_url']
@@ -290,22 +292,21 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
    delivery=deliv,
    stock=1,
    warranty=s_info.get('badge', '100% Genuine Verified'),
-   returns=s_info.get('delivery_time', 'Standard Return Policy')
+   returns=s_info.get('return_policy', '7-day return policy')
   )
   db.add(listing)
   db.flush()
   
   # Create current & historical price snapshots for Decision Lab
   total = round(price + deliv, 2)
-  for mult in [1.08, 1.04, 1.0, 0.98]:
-   db.add(PriceSnapshot(
-    listing_id=listing.id,
-    price=round(price * mult, 2),
-    delivery=deliv,
-    total=round((price * mult) + deliv, 2),
-    stock=1,
-    seller=seller_name
-   ))
+  db.add(PriceSnapshot(
+   listing_id=listing.id,
+   price=price,
+   delivery=deliv,
+   total=total,
+   stock=1,
+   seller=seller_name
+  ))
  db.commit()
  return prod
 
@@ -636,7 +637,7 @@ def get_substitutes(product_id:int,u=Depends(current_user),db:Session=Depends(ge
 def compare(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):return product_summary(db,product_id)
 @app.get('/api/products/{product_id}/analysis')
 def analysis(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
- c=product_summary(db,product_id);hist=[s.total for l in db.query(StoreListing).filter_by(product_id=product_id).all() for s in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()];return {'decision':decision(c['best']['true_total'],None,hist),'prediction':prediction(hist,c['best']['true_total'],None),'fake_discount':fake_discount(c['best']['true_total'],c['best']['price']*2,hist),'history':hist}
+ c=product_summary(db,product_id);hist=[s.total for l in db.query(StoreListing).filter_by(product_id=product_id).all() for s in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()];return {'decision':decision(c['best']['true_total'],None,hist),'prediction':prediction(hist,c['best']['true_total'],None),'fake_discount':fake_discount(c['best']['true_total'],c['best'].get('price', c['best']['true_total']),hist),'history':hist}
 @app.get('/api/products/{product_id}/decision-lab')
 def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  c=product_summary(db,product_id);p=db.get(Product,product_id);best=c['best'];listings=c['listings']
@@ -645,13 +646,13 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  dec=decision(current_price,None,hist)
  score=calculate_shopagent_score(p.__dict__,best,hist)
  regret=calculate_regret_shield(current_price,hist,best.get('seller_rating',4.0))
- simulator=simulate_buy_vs_wait(current_price,hist)
- skeptic=generate_second_opinion(dec['decision'],current_price,hist,p.name)
- why_not=generate_why_not_buy(current_price,hist,p.__dict__)
- deal_truth=analyze_deal_truth(best.get('price',current_price)*1.3,current_price,hist)
- ownership=calculate_ownership_cost(current_price,p.category or 'Electronics')
- compat=check_compatibility(p.name,p.specs or '')
+ simulator=simulate_buy_vs_wait(current_price,hist,product_name=p.name)
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
+ skeptic=generate_second_opinion(dec['decision'],current_price,hist,p.name,pref=pref)
+ why_not=generate_why_not_buy(current_price,hist,p.__dict__,pref=pref)
+ deal_truth=analyze_deal_truth(best.get('price',current_price),current_price,hist)
+ ownership=calculate_ownership_cost(current_price,p.category or 'Electronics',product_name=p.name,pref=pref)
+ compat=check_compatibility(p.name,p.specs or '',pref=pref)
  reviews=get_review_intelligence(p.name, p.category or 'General', pref=pref)
  # Derive seller trust from real listing data
  best_listing = db.query(StoreListing).filter_by(product_id=product_id).order_by(StoreListing.price.asc()).first()
@@ -697,6 +698,7 @@ def notifications(u=Depends(current_user),db:Session=Depends(get_db)):
  return [{'id':n.id,'kind':n.kind,'title':n.title,'message':n.message,'read':n.read,'created_at':n.created_at} for n in db.query(Notification).filter_by(user_id=u.id).order_by(Notification.created_at.desc()).limit(100)]
 @app.post('/api/items/{item_id}/checkout')
 def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency-Key'),u=Depends(current_user),db:Session=Depends(get_db)):
+ from .checkout import PurchasePolicy
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
  if not it: raise HTTPException(404,'Item not found')
  if not it.product_id:
@@ -707,10 +709,19 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  existing=db.query(Order).filter_by(idempotency_key=idempotency_key).first()
  if existing: return {'status':existing.status,'order_number':existing.order_number,'idempotent_replay':True}
  c=product_summary(db,it.product_id); best=c.get('best') or {}
+ 
+ pref = db.query(UserPreference).filter_by(user_id=u.id).first()
+ month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+ monthly_spend = sum(o.price for o in db.query(Order).filter(Order.user_id==u.id, Order.created_at >= month_start).all())
+ duplicate = db.query(Order).filter(Order.user_id==u.id, Order.item_id==it.id).first() is not None
+ 
+ allowed, reason = PurchasePolicy().authorize(it, best, pref, monthly_spend, duplicate)
+ if not allowed: raise HTTPException(403, reason)
+ 
  order_num = f"ORD-{uuid.uuid4().hex[:8].upper()}"
  total_price = float(best.get('true_total', best.get('price', it.target_price or 999.0)))
  observed_price = float(best.get('price', total_price))
- savings_val = round(max(0.0, float((it.max_price or (total_price * 1.15)) - total_price)), 2)
+ savings_val = round(max(0.0, float((it.target_price or it.max_price or total_price) - total_price)), 2)
  listing_id = best.get('id') or best.get('listing_id')
  if not isinstance(listing_id, int):
   first_listing = db.query(StoreListing).filter_by(product_id=it.product_id).first()
@@ -724,7 +735,7 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   price=total_price,
   observed_price=observed_price,
   savings=savings_val,
-  status='CONFIRMED',
+  status='PENDING_USER_ACTION',
   order_number=order_num,
   idempotency_key=idempotency_key,
   is_gift=getattr(it, 'is_gift', False),
@@ -734,13 +745,13 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  )
  db.add(ord_rec)
  it.status = 'COMPLETED'
- it.completed_at = now()
- db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Order {order_num} placed for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). Verified savings: ₹{savings_val:,.2f}."))
+ it.completed_at = now() if hasattr(it, 'completed_at') else datetime.now(timezone.utc)
+ db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Purchase initiated for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). User action required to complete. Verified savings: ₹{savings_val:,.2f}."))
  db.commit()
  return {
-  'status': 'CONFIRMED',
+  'status': 'PENDING_USER_ACTION',
   'order_number': order_num,
-  'message': f"Order confirmed with {best.get('store', 'Retailer')}. Saved ₹{savings_val:,.2f}.",
+  'message': f"Please complete the purchase on the retailer site: {best.get('store', 'Retailer')}. Saved ₹{savings_val:,.2f}.",
   'product': it.name,
   'store': best.get('store', 'Retailer'),
   'url': best.get('url', ''),
@@ -760,30 +771,23 @@ def scan_invoice(p:InvoiceScanIn,u=Depends(current_user),db:Session=Depends(get_
 def order_receipt(order_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  o=db.query(Order).filter_by(id=order_id,user_id=u.id).first()
  if not o:raise HTTPException(404,'Order not found')
- subtotal = round(o.price * 0.9524, 2)
- gst = round(o.price - subtotal, 2)
+ subtotal = round(o.price, 2)
+ gst = 0.0
  
  store_name = o.store or 'Retail Store'
+ retailer_order_id = o.order_number
+ invoice_num = o.order_number
+ 
  if 'amazon' in store_name.lower():
-  retailer_order_id = f"402-{abs(hash(o.order_number))%9000000+1000000}-{abs(hash(o.order_number*2))%9000000+1000000}"
   store_return_url = f"https://www.amazon.in/gp/your-account/order-details?orderID={retailer_order_id}"
-  invoice_num = f"IN-AMZ-{o.created_at.year if o.created_at else 2026}-{abs(hash(retailer_order_id))%90000+10000}"
  elif 'flipkart' in store_name.lower():
-  retailer_order_id = f"OD{abs(hash(o.order_number))%90000000000000000+10000000000000000}"
   store_return_url = f"https://www.flipkart.com/account/orders/{retailer_order_id}"
-  invoice_num = f"FK-GST-{o.created_at.year if o.created_at else 2026}-{abs(hash(retailer_order_id))%90000+10000}"
  elif 'blinkit' in store_name.lower():
-  retailer_order_id = f"ORD-BLNK-{abs(hash(o.order_number))%900000+100000}"
   store_return_url = f"https://blinkit.com/orders/{retailer_order_id}"
-  invoice_num = f"BLNK-INV-{abs(hash(retailer_order_id))%90000+10000}"
  elif 'zepto' in store_name.lower():
-  retailer_order_id = f"ZPT-{abs(hash(o.order_number))%900000+100000}"
   store_return_url = f"https://www.zeptonow.com/orders/{retailer_order_id}"
-  invoice_num = f"ZPT-INV-{abs(hash(retailer_order_id))%90000+10000}"
  else:
-  retailer_order_id = o.order_number
-  store_return_url = f"https://{store_name.lower().replace(' ', '')}.com/orders/{o.order_number}"
-  invoice_num = f"INV-{abs(hash(o.order_number))%90000+10000}"
+  store_return_url = f"https://{store_name.lower().replace(' ', '')}.com/orders/{retailer_order_id}"
 
  return {
   'order_number': o.order_number,
@@ -850,7 +854,7 @@ def add_family(p:FamilyIn,u=Depends(current_user),db:Session=Depends(get_db)):
  x=FamilyMember(user_id=u.id,**p.model_dump());db.add(x);db.commit();db.refresh(x);return {'id':x.id,**p.model_dump()}
 @app.get('/api/savings')
 def savings(u=Depends(current_user),db:Session=Depends(get_db)):
- o=db.query(Order).filter_by(user_id=u.id).all();return {'verified_savings':round(sum(x.savings for x in o),2),'orders':len(o)}
+ o=db.query(Order).filter_by(user_id=u.id).all();return {'verified_savings':round(sum(x.savings for x in o),2),'orders':len(o),'note':'Savings are from verified purchases only.'}
 @app.get('/api/basket')
 def get_basket(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);data=[]

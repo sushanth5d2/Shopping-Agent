@@ -21,15 +21,15 @@ class ProductObservation:
     currency: str = 'INR'
     stock: int = 1
     seller: str = ''
-    seller_rating: float = 4.5
+    seller_rating: float = 0.0
     delivery: float = 0
     tax: float = 0
     fees: float = 0
     coupon: float = 0
     cashback: float = 0
     delivery_days: int | None = 2
-    warranty: str = '1 Year Standard Warranty'
-    returns: str = '7 Days Returnable'
+    warranty: str = ''
+    returns: str = ''
     condition: str = 'New'
     url: str = ''
     checkout_supported: bool = False
@@ -213,21 +213,10 @@ class JsonLdWebConnector(StoreConnector):
 
         # Fallback price calculation from genuine product name intelligence (never arbitrary 999)
         final_price = normalize_price(price) if price else 0.0
+        observed_live = True
         if final_price <= 0:
-            # Derive realistic market price estimate from genuine product name
-            p_name_low = name.lower()
-            if 'iphone' in p_name_low or 'pro max' in p_name_low:
-                final_price = 79900.0 if '17' in p_name_low else 69900.0 if '16' in p_name_low else 59900.0
-            elif 'macbook' in p_name_low:
-                final_price = 89900.0
-            elif 'headphone' in p_name_low or 'sony wh' in p_name_low:
-                final_price = 24990.0
-            elif 'mouse' in p_name_low or 'mx master' in p_name_low:
-                final_price = 7995.0
-            elif any(k in p_name_low for k in ['bread', 'garlic', 'tomato', 'potato', 'milk']):
-                final_price = 45.0
-            else:
-                final_price = 1499.0
+            final_price = 0.0
+            observed_live = False
 
         # 6. Extract Brand / Seller / Stock
         brand_val = prod.get('brand', {}) if isinstance(prod, dict) else {}
@@ -267,9 +256,9 @@ class JsonLdWebConnector(StoreConnector):
             currency='INR',
             stock=stock,
             seller=seller_name,
-            seller_rating=4.8,
+            seller_rating=0.0,
             url=final_url,
-            observed_live=True
+            observed_live=observed_live
         )
 
 def connector_for(url: str):

@@ -438,7 +438,10 @@ export default function App() {
         method: 'POST',
         headers: { 'Idempotency-Key': crypto.randomUUID() }
       });
-      setToast(x.message || 'Order confirmed!');
+      setToast(x.message || 'Order processing...');
+      if (x.store_url) {
+        window.open(x.store_url, '_blank');
+      }
       await load();
     } catch (e: any) {
       setToast(e.message);

@@ -90,348 +90,144 @@ def classify_product_category(name: str) -> str:
 def estimate_item_market_price(name: str, category: str, user_target: float | None = None) -> float:
     if user_target and user_target > 0:
         return float(user_target)
-    n = name.lower()
     
-    if 'tomato' in n: return 38.0
-    if 'chilli' in n or 'chili' in n: return 24.0
-    if 'garlic' in n: return 68.0
-    if 'ginger' in n: return 45.0
-    if 'onion' in n: return 42.0
-    if 'potato' in n: return 32.0
-    if 'butter' in n: return 58.0
-    if 'milk' in n: return 34.0
-    if 'paneer' in n or 'cheese' in n: return 95.0
-    if 'bread' in n: return 45.0
-    if 'egg' in n: return 84.0
-    if 'oil' in n or 'ghee' in n: return 185.0
-    if 'rice' in n or 'atta' in n: return 240.0
-    
-    if 'macbook' in n or 'mac' in n: return 89990.0
-    if 'iphone' in n: return 79900.0
-    if 'samsung s' in n or 'galaxy' in n: return 64999.0
-    if 'laptop' in n: return 54990.0
-    if 'monitor' in n or 'tv' in n: return 18999.0
-    if 'headphone' in n or 'airpods' in n: return 4999.0
-    if 'mouse' in n or 'keyboard' in n: return 1299.0
-    if 'smartwatch' in n: return 2999.0
-    
-    if 'dolo' in n or 'paracetamol' in n: return 32.0
-    if 'protein' in n or 'whey' in n: return 2499.0
-    if 'vitamin' in n: return 340.0
-    
-    if category == 'GROCERY': return 65.0
-    if category == 'ELECTRONICS': return 12999.0
-    if category == 'HEALTH': return 199.0
-    if category == 'FASHION': return 999.0
-    return 899.0
+    try:
+        query = f'"{name}" price India'
+        url = "https://html.duckduckgo.com/html/"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        resp = httpx.post(url, data={"q": query}, headers=headers, timeout=5.0)
+        if resp.status_code == 200:
+            import bs4, re
+            soup = bs4.BeautifulSoup(resp.text, 'html.parser')
+            for el in soup.find_all('a', class_='result__snippet'):
+                snippet = el.get_text()
+                match = re.search(r'(?:â‚¹|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)', snippet, re.IGNORECASE)
+                if match:
+                    price_str = match.group(1).replace(',', '')
+                    return float(price_str)
+    except Exception:
+        pass
 
-def get_stores_for_category(category: str, query: str, base_price: float, pincode: str = '560001') -> list[dict]:
+    if category == 'GROCERY': return 100.0
+    if category == 'ELECTRONICS': return 5000.0
+    if category == 'HEALTH': return 300.0
+    if category == 'FASHION': return 800.0
+    return 1000.0
+
+def search_live_stores(category: str, query: str, base_price: float, pincode: str = '560001') -> list[dict]:
+    """Search real stores for product listings via DuckDuckGo. Returns live store results."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus, urlparse, parse_qs
+
     q_slug = re.sub(r'[^a-zA-Z0-9]', '+', query.strip())
     bp = max(10.0, float(base_price))
-    
-    if category == 'GROCERY':
-        return [
-            {
-                'name': 'Blinkit',
-                'domain': 'blinkit.com',
-                'base_url': 'blinkit.com',
-                'url': f'https://blinkit.com/s/?q={q_slug}',
-                'price': round(bp * 0.96, 2),
-                'delivery': 15.0,
-                'rating': 4.8,
-                'delivery_time': '10-15 mins',
-                'seller': 'Blinkit Dark Store Express',
-                'badge': '12 MIN DELIVERY'
-            },
-            {
-                'name': 'Swiggy Instamart',
-                'domain': 'swiggy.com',
-                'base_url': 'swiggy.com/instamart',
-                'url': f'https://www.swiggy.com/instamart/search?query={q_slug}',
-                'price': round(bp * 0.94, 2),
-                'delivery': 16.0,
-                'rating': 4.7,
-                'delivery_time': '12-18 mins',
-                'seller': 'Instamart Pod Hub',
-                'badge': 'INSTANT POD'
-            },
-            {
-                'name': 'Zepto',
-                'domain': 'zeptonow.com',
-                'base_url': 'zeptonow.com',
-                'url': f'https://www.zeptonow.com/search?q={q_slug}',
-                'price': round(bp * 0.97, 2),
-                'delivery': 15.0,
-                'rating': 4.8,
-                'delivery_time': '10 mins',
-                'seller': 'Zepto Quick Hub',
-                'badge': '10 MIN ZEAL'
-            },
-            {
-                'name': 'BigBasket / BBNow',
-                'domain': 'bigbasket.com',
-                'base_url': 'bigbasket.com',
-                'url': f'https://www.bigbasket.com/ps/?q={q_slug}',
-                'price': round(bp * 0.92, 2),
-                'delivery': 25.0,
-                'rating': 4.6,
-                'delivery_time': 'Today Evening / 20 mins',
-                'seller': 'BigBasket Supermarket',
-                'badge': 'FARM FRESH'
-            },
-            {
-                'name': 'Amazon Fresh',
-                'domain': 'amazon.in',
-                'base_url': 'amazon.in/fresh',
-                'url': f'https://www.amazon.in/s?k={q_slug}&i=nowstore',
-                'price': round(bp * 0.98, 2),
-                'delivery': 30.0,
-                'rating': 4.7,
-                'delivery_time': '2-Hour Slot',
-                'seller': 'Amazon Fresh Direct',
-                'badge': 'SLOT DISPATCH'
-            },
-            {
-                'name': 'JioMart',
-                'domain': 'jiomart.com',
-                'base_url': 'jiomart.com',
-                'url': f'https://www.jiomart.com/search/{q_slug}',
-                'price': round(bp * 0.90, 2),
-                'delivery': 0.0,
-                'rating': 4.5,
-                'delivery_time': 'Next Day Morning',
-                'seller': 'Reliance Retail Limited',
-                'badge': 'FREE DELIVERY'
-            },
-            {
-                'name': 'DMart Ready',
-                'domain': 'dmart.in',
-                'base_url': 'dmart.in',
-                'url': f'https://www.dmart.in/search/{q_slug}',
-                'price': round(bp * 0.89, 2),
-                'delivery': 49.0,
-                'rating': 4.6,
-                'delivery_time': 'Scheduled Pick-up / Home',
-                'seller': 'Avenue Supermarts (DMart)',
-                'badge': 'LOWEST MRP'
-            }
+    results = []
+
+    # Known Indian store URL patterns and names
+    store_map = {
+        'amazon.in': ('Amazon India', 'PRIME VERIFIED'),
+        'flipkart.com': ('Flipkart', 'FLIPKART ASSURED'),
+        'blinkit.com': ('Blinkit', '10 MIN DELIVERY'),
+        'swiggy.com': ('Swiggy Instamart', 'INSTANT DELIVERY'),
+        'zeptonow.com': ('Zepto', 'QUICK DELIVERY'),
+        'bigbasket.com': ('BigBasket', 'FRESH DELIVERY'),
+        'croma.com': ('Croma', 'RETAIL STORE'),
+        'reliancedigital.in': ('Reliance Digital', 'RETAIL STORE'),
+        'jiomart.com': ('JioMart', 'JIO PARTNER'),
+        'myntra.com': ('Myntra', 'FASHION STORE'),
+        'ajio.com': ('AJIO', 'FASHION STORE'),
+        'nykaa.com': ('Nykaa', 'BEAUTY STORE'),
+        'tatacliq.com': ('Tata CLiQ', 'TRUSTED RETAIL'),
+        'meesho.com': ('Meesho', 'VALUE STORE'),
+    }
+
+    try:
+        search_query = f'"{query}" buy price India site:amazon.in OR site:flipkart.com'
+        if category == 'GROCERY':
+            search_query = f'"{query}" buy price site:blinkit.com OR site:swiggy.com OR site:bigbasket.com OR site:zeptonow.com'
+        elif category == 'FASHION':
+            search_query = f'"{query}" buy price site:myntra.com OR site:ajio.com OR site:flipkart.com OR site:amazon.in'
+
+        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(search_query)}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
+        r = httpx.post(ddg_url, headers=headers, data={'q': search_query}, timeout=settings.review_search_timeout)
+
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            for res_el in soup.select('.result'):
+                if len(results) >= 6:
+                    break
+                title_el = res_el.select_one('.result__title a')
+                snippet_el = res_el.select_one('.result__snippet')
+                if not title_el:
+                    continue
+                title = title_el.get_text().strip()
+                snippet = snippet_el.get_text().strip() if snippet_el else ''
+                href = title_el.get('href', '')
+
+                actual_url = href
+                if 'uddg=' in href:
+                    parsed = urlparse(href)
+                    qs = parse_qs(parsed.query)
+                    actual_url = qs.get('uddg', [href])[0]
+                if not actual_url or not actual_url.startswith('http'):
+                    continue
+
+                host = (urlparse(actual_url).hostname or '').lower().replace('www.', '')
+
+                # Identify store
+                store_name = None
+                badge = 'ONLINE STORE'
+                for domain, (sname, sbadge) in store_map.items():
+                    if domain in host:
+                        store_name = sname
+                        badge = sbadge
+                        break
+                if not store_name:
+                    store_name = host.split('.')[0].capitalize() if host else 'Online Store'
+
+                # Try to extract price from snippet
+                price_match = re.search(r'(?:â‚¹|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)', snippet, re.I)
+                price = float(price_match.group(1).replace(',', '')) if price_match else 0.0
+
+                results.append({
+                    'name': store_name,
+                    'domain': host,
+                    'base_url': host,
+                    'url': actual_url,
+                    'price': price if price > 0 else bp,
+                    'delivery': 0.0,
+                    'rating': 0.0,
+                    'delivery_time': 'Check store',
+                    'seller': f'{store_name} Seller',
+                    'badge': badge,
+                    'return_policy': '7-day return policy'
+                })
+    except Exception:
+        pass
+
+    # If no results found, provide store search URLs so user can check manually
+    if not results:
+        fallback_stores = [
+            ('Amazon India', f'https://www.amazon.in/s?k={q_slug}', 'amazon.in'),
+            ('Flipkart', f'https://www.flipkart.com/search?q={q_slug}', 'flipkart.com'),
         ]
-    elif category == 'ELECTRONICS':
-        return [
-            {
-                'name': 'Amazon India',
-                'domain': 'amazon.in',
-                'base_url': 'amazon.in',
-                'url': f'https://www.amazon.in/s?k={q_slug}',
-                'price': round(bp * 0.98, 2),
-                'delivery': 0.0,
-                'rating': 4.8,
-                'delivery_time': 'Tomorrow by 11 AM (Prime)',
-                'seller': 'Appario Retail / Amazon Direct',
-                'badge': 'PRIME VERIFIED'
-            },
-            {
-                'name': 'Flipkart',
-                'domain': 'flipkart.com',
-                'base_url': 'flipkart.com',
-                'url': f'https://www.flipkart.com/search?q={q_slug}',
-                'price': round(bp * 0.97, 2),
-                'delivery': 40.0,
-                'rating': 4.7,
-                'delivery_time': '2 Days Assured',
-                'seller': 'Flipkart Assured F-Plus',
-                'badge': 'FLIPKART ASSURED'
-            },
-            {
-                'name': 'Croma',
-                'domain': 'croma.com',
-                'base_url': 'croma.com',
-                'url': f'https://www.croma.com/searchB?q={q_slug}',
-                'price': round(bp * 0.99, 2),
-                'delivery': 0.0,
-                'rating': 4.7,
-                'delivery_time': 'Same Day Store Pickup / 24h',
-                'seller': 'Infiniti Retail (A Tata Enterprise)',
-                'badge': 'TATA BACKED'
-            },
-            {
-                'name': 'Reliance Digital',
-                'domain': 'reliancedigital.in',
-                'base_url': 'reliancedigital.in',
-                'url': f'https://www.reliancedigital.in/search?q={q_slug}',
-                'price': round(bp * 0.96, 2),
-                'delivery': 0.0,
-                'rating': 4.6,
-                'delivery_time': 'Express 3-Hour Delivery',
-                'seller': 'Reliance Digital Store Express',
-                'badge': 'RESQ WARRANTY'
-            },
-            {
-                'name': 'Vijay Sales',
-                'domain': 'vijaysales.com',
-                'base_url': 'vijaysales.com',
-                'url': f'https://www.vijaysales.com/search/{q_slug}',
-                'price': round(bp * 0.95, 2),
-                'delivery': 0.0,
-                'rating': 4.6,
-                'delivery_time': '1-2 Business Days',
-                'seller': 'Vijay Sales Authorized Retail',
-                'badge': 'OFFICIAL DISTRIBUTOR'
-            },
-            {
-                'name': 'Tata CLiQ',
-                'domain': 'tatacliq.com',
-                'base_url': 'tatacliq.com',
-                'url': f'https://www.tatacliq.com/search/?searchCategory=all&text={q_slug}',
-                'price': round(bp * 1.01, 2),
-                'delivery': 0.0,
-                'rating': 4.7,
-                'delivery_time': '2-3 Business Days',
-                'seller': 'Tata CLiQ Genuine Brand Hub',
-                'badge': '100% AUTHENTIC'
-            }
-        ]
-    elif category == 'HEALTH':
-        return [
-            {
-                'name': 'Tata 1mg',
-                'domain': '1mg.com',
-                'base_url': '1mg.com',
-                'url': f'https://www.1mg.com/search/all?name={q_slug}',
-                'price': round(bp * 0.88, 2),
-                'delivery': 25.0,
-                'rating': 4.9,
-                'delivery_time': '4-Hour Care Dispatch',
-                'seller': '1mg Healthcare Solutions (Tata)',
-                'badge': 'VERIFIED PHARMA'
-            },
-            {
-                'name': 'Apollo 24|7',
-                'domain': 'apollo247.com',
-                'base_url': 'apollo247.com',
-                'url': f'https://www.apollo247.com/search-medicines/{q_slug}',
-                'price': round(bp * 0.90, 2),
-                'delivery': 20.0,
-                'rating': 4.8,
-                'delivery_time': '2-Hour Apollo Clinic Dispatch',
-                'seller': 'Apollo Pharmacy Limited',
-                'badge': 'APOLLO CERTIFIED'
-            },
-            {
-                'name': 'PharmEasy',
-                'domain': 'pharmeasy.in',
-                'base_url': 'pharmeasy.in',
-                'url': f'https://pharmeasy.in/search/all?name={q_slug}',
-                'price': round(bp * 0.85, 2),
-                'delivery': 30.0,
-                'rating': 4.7,
-                'delivery_time': 'Today by 8 PM',
-                'seller': 'PharmEasy Registered Chemists',
-                'badge': 'FLAT 15% OFF'
-            },
-            {
-                'name': 'Netmeds',
-                'domain': 'netmeds.com',
-                'base_url': 'netmeds.com',
-                'url': f'https://www.netmeds.com/catalogsearch/result/{q_slug}/all',
-                'price': round(bp * 0.87, 2),
-                'delivery': 25.0,
-                'rating': 4.7,
-                'delivery_time': 'Tomorrow Morning',
-                'seller': 'Netmeds Marketplace (Reliance)',
-                'badge': 'INDIA KI PHARMACY'
-            }
-        ]
-    elif category == 'FASHION':
-        return [
-            {
-                'name': 'Myntra',
-                'domain': 'myntra.com',
-                'base_url': 'myntra.com',
-                'url': f'https://www.myntra.com/{q_slug}',
-                'price': round(bp * 0.90, 2),
-                'delivery': 0.0,
-                'rating': 4.8,
-                'delivery_time': '2 Days Fast Dispatch',
-                'seller': 'Myntra Certified Brand Outlet',
-                'badge': 'MYNTRA INSIDER'
-            },
-            {
-                'name': 'Ajio',
-                'domain': 'ajio.com',
-                'base_url': 'ajio.com',
-                'url': f'https://www.ajio.com/search/?text={q_slug}',
-                'price': round(bp * 0.88, 2),
-                'delivery': 40.0,
-                'rating': 4.7,
-                'delivery_time': '2-3 Business Days',
-                'seller': 'Reliance Trends / Ajio Direct',
-                'badge': 'AJIO MANIA'
-            },
-            {
-                'name': 'Nykaa',
-                'domain': 'nykaa.com',
-                'base_url': 'nykaa.com',
-                'url': f'https://www.nykaa.com/search/result/?q={q_slug}',
-                'price': round(bp * 0.95, 2),
-                'delivery': 0.0,
-                'rating': 4.9,
-                'delivery_time': 'Tomorrow 10 AM',
-                'seller': 'Nykaa Authentic E-Retail',
-                'badge': '100% ORIGINAL'
-            },
-            {
-                'name': 'Meesho',
-                'domain': 'meesho.com',
-                'base_url': 'meesho.com',
-                'url': f'https://www.meesho.com/search?q={q_slug}',
-                'price': round(bp * 0.78, 2),
-                'delivery': 0.0,
-                'rating': 4.4,
-                'delivery_time': '4-5 Days Direct from Maker',
-                'seller': 'Direct Manufacturer Direct',
-                'badge': 'WHOLESALE RATE'
-            }
-        ]
-    else:
-        return [
-            {
-                'name': 'Amazon India',
-                'domain': 'amazon.in',
-                'base_url': 'amazon.in',
-                'url': f'https://www.amazon.in/s?k={q_slug}',
-                'price': round(bp * 0.98, 2),
-                'delivery': 0.0,
-                'rating': 4.8,
-                'delivery_time': '1-2 Days',
-                'seller': 'Amazon Direct Fulfillment',
-                'badge': 'PRIME'
-            },
-            {
-                'name': 'Flipkart',
-                'domain': 'flipkart.com',
-                'base_url': 'flipkart.com',
-                'url': f'https://www.flipkart.com/search?q={q_slug}',
-                'price': round(bp * 0.96, 2),
-                'delivery': 40.0,
-                'rating': 4.7,
-                'delivery_time': '2 Days',
-                'seller': 'Flipkart Verified Hub',
-                'badge': 'ASSURED'
-            },
-            {
-                'name': 'JioMart',
-                'domain': 'jiomart.com',
-                'base_url': 'jiomart.com',
-                'url': f'https://www.jiomart.com/search/{q_slug}',
-                'price': round(bp * 0.92, 2),
-                'delivery': 0.0,
-                'rating': 4.5,
-                'delivery_time': '2 Days',
-                'seller': 'Reliance Retail Hub',
-                'badge': 'SAVER'
-            }
-        ]
+        if category == 'GROCERY':
+            fallback_stores = [
+                ('Blinkit', f'https://blinkit.com/s/?q={q_slug}', 'blinkit.com'),
+                ('BigBasket', f'https://www.bigbasket.com/ps/?q={q_slug}', 'bigbasket.com'),
+                ('Zepto', f'https://www.zeptonow.com/search?q={q_slug}', 'zeptonow.com'),
+            ]
+        for sname, surl, sdomain in fallback_stores:
+            results.append({
+                'name': sname, 'domain': sdomain, 'base_url': sdomain,
+                'url': surl, 'price': bp, 'delivery': 0.0, 'rating': 0.0,
+                'delivery_time': 'Check store', 'seller': f'{sname} Seller',
+                'badge': 'SEARCH RESULTS', 'return_policy': 'Check store policy'
+            })
+
+    return results
+
 
 # ==========================================================
 # Comprehensive Decision Lab Engines
@@ -471,7 +267,7 @@ def calculate_shopagent_score(product: dict, best_listing: dict, history: list[f
     has_warranty = bool(best_listing.get('warranty'))
     has_returns = bool(best_listing.get('returns'))
     warranty_pts = (15 if has_warranty else 5) + (10 if has_returns else 0)
-    breakdown['protection'] = {'points': warranty_pts, 'max': 25, 'reason': f"{best_listing.get('warranty', 'Standard')} · {best_listing.get('returns', 'Standard return policy')}"}
+    breakdown['protection'] = {'points': warranty_pts, 'max': 25, 'reason': f"{best_listing.get('warranty', 'Standard')} Â· {best_listing.get('returns', 'Standard return policy')}"}
 
     # 4. Product Quality & Specs (0-20 pts)
     quality_pts = 18 if product.get('specs') else 14
@@ -514,83 +310,125 @@ def calculate_regret_shield(current: float, history: list[float], seller_rating:
         'reasons': reasons
     }
 
-def simulate_buy_vs_wait(current: float, history: list[float]) -> list[dict]:
-    """Projects expected pricing across 0, 7, 14, and 30 days based on volatility."""
+def simulate_buy_vs_wait(current: float, history: list[float], product_name: str = '', pref=None) -> list[dict]:
+    """Projects pricing across 0, 7, 14, and 30 days using real statistical analysis of price history."""
     low = min(history) if history else current * 0.95
     avg = statistics.mean(history) if history else current
-    volatility = statistics.stdev(history) if len(history) > 1 else current * 0.04
+    volatility = statistics.stdev(history) if len(history) > 1 else current * 0.02
+    drop_frequency = sum(1 for i in range(1, len(history)) if history[i] < history[i-1]) / max(len(history)-1, 1) if len(history) > 1 else 0.3
+
+    cv = volatility / max(avg, 1)
+    p7 = min(90, max(5, int(drop_frequency * 40 + cv * 50)))
+    p14 = min(90, max(p7, int(drop_frequency * 55 + cv * 70)))
+    p30 = min(95, max(p14, int(drop_frequency * 70 + cv * 90)))
+
+    stock_risk_7 = 'Low' if cv < 0.05 else 'Medium' if cv < 0.1 else 'High'
+    stock_risk_14 = 'Medium' if cv < 0.05 else 'High' if cv < 0.1 else 'High'
+
+    if current <= low * 1.02:
+        rec_today = f'{product_name or "Product"} is at its lowest observed price — strong buy signal'
+    elif current > avg * 1.1:
+        rec_today = f'{product_name or "Product"} is above average (₹{avg:,.0f}) — consider waiting'
+    else:
+        rec_today = f'Price is within normal range (avg ₹{avg:,.0f}, low ₹{low:,.0f})'
 
     return [
-        {
-            'timeline': 'Today',
-            'expected_price': current,
-            'drop_probability': 0,
-            'expected_savings': 0,
-            'stock_risk': 'None',
-            'recommendation': 'Instant execution with verified stock'
-        },
-        {
-            'timeline': 'In 7 Days',
-            'expected_price': round(max(low, current - volatility * 0.4), 2),
-            'drop_probability': 28,
-            'expected_savings': round(max(0, current - max(low, current - volatility * 0.4)), 2),
-            'stock_risk': 'Low',
-            'recommendation': 'Minor flash sale opportunity'
-        },
-        {
-            'timeline': 'In 14 Days',
-            'expected_price': round(max(low, current - volatility * 0.8), 2),
-            'drop_probability': 45,
-            'expected_savings': round(max(0, current - max(low, current - volatility * 0.8)), 2),
-            'stock_risk': 'Medium',
-            'recommendation': 'Weekend sale cycle expected'
-        },
-        {
-            'timeline': 'In 30 Days',
-            'expected_price': round(max(low, avg * 0.96), 2),
-            'drop_probability': 68,
-            'expected_savings': round(max(0, current - max(low, avg * 0.96)), 2),
-            'stock_risk': 'High',
-            'recommendation': 'Potential seasonal discounts'
-        }
+        {'timeline': 'Today', 'expected_price': current, 'drop_probability': 0,
+         'expected_savings': 0, 'stock_risk': 'None', 'recommendation': rec_today},
+        {'timeline': 'In 7 Days', 'expected_price': round(max(low, current - volatility * 0.4), 2),
+         'drop_probability': p7,
+         'expected_savings': round(max(0, current - max(low, current - volatility * 0.4)), 2),
+         'stock_risk': stock_risk_7,
+         'recommendation': f'{p7}% chance of price drop based on {len(history)} historical observations'},
+        {'timeline': 'In 14 Days', 'expected_price': round(max(low, current - volatility * 0.8), 2),
+         'drop_probability': p14,
+         'expected_savings': round(max(0, current - max(low, current - volatility * 0.8)), 2),
+         'stock_risk': stock_risk_14,
+         'recommendation': f'Historical price range: ₹{low:,.0f} – ₹{max(history) if history else current:,.0f}'},
+        {'timeline': 'In 30 Days', 'expected_price': round(max(low, avg * 0.96), 2),
+         'drop_probability': p30,
+         'expected_savings': round(max(0, current - max(low, avg * 0.96)), 2),
+         'stock_risk': 'High',
+         'recommendation': f'Volatility index: {cv:.1%} — {"High" if cv > 0.1 else "Moderate" if cv > 0.05 else "Low"} price movement expected'}
     ]
 
-def generate_second_opinion(primary_decision: str, current: float, history: list[float], product_name: str) -> dict:
-    """Skeptic Agent: Generates an independent second opinion challenging the recommendation."""
+def generate_second_opinion(primary_decision: str, current: float, history: list[float], product_name: str, pref=None) -> dict:
+    """Skeptic Agent: Generates AI-powered counterarguments to the primary recommendation."""
+    low = min(history) if history else current
+    avg = statistics.mean(history) if history else current
+    diff = round(current - low, 2)
+
+    # Try AI-powered opinion first
+    ai_args = _ai_chat_completion(
+        f"You are a skeptical shopping advisor. The primary recommendation for \"{product_name}\" "
+        f"(current price ₹{current:,.0f}, historical low ₹{low:,.0f}, average ₹{avg:,.0f}) is: {primary_decision}. "
+        f"Give exactly 3 short counterarguments (each 1 sentence) challenging this recommendation. "
+        f"Return ONLY the 3 arguments as a numbered list, no other text.",
+        pref=pref
+    )
+
+    if ai_args and len(ai_args) > 20:
+        arguments = [line.strip().lstrip('0123456789.-) ') for line in ai_args.strip().split('\n') if line.strip() and len(line.strip()) > 10][:3]
+        if len(arguments) >= 2:
+            stance = 'WAIT' if primary_decision == 'BUY' else 'BUY_IF_URGENT'
+            return {'stance': stance, 'skeptic_verdict': 'AI Analysis', 'arguments': arguments}
+
+    # Fallback: dynamic data-driven arguments
     if primary_decision == 'BUY':
-        low = min(history) if history else current
-        diff = round(current - low, 2)
-        return {
-            'stance': 'WAIT',
-            'skeptic_verdict': 'Caution Advised',
-            'arguments': [
-                f'Although listed at a good price, it was seen at ₹{low:,.0f} previously (₹{diff:,.0f} lower).' if diff > 0 else 'Stock levels are currently stable; urgent purchase may not be mandatory.',
-                'Upcoming holiday / monthly sale events typically offer 5-10% bank cashback.',
-                'Verify if you genuinely need this immediately or if monitoring could yield a better bundle.'
-            ]
-        }
+        args = []
+        if diff > 0:
+            args.append(f'{product_name} was seen at ₹{low:,.0f} previously (₹{diff:,.0f} lower than current ₹{current:,.0f}).')
+        else:
+            args.append(f'{product_name} is at its historical low — but new models may launch soon causing further drops.')
+        if current > avg * 0.95:
+            args.append(f'Current price ₹{current:,.0f} is close to the average ₹{avg:,.0f} — not a significant discount.')
+        else:
+            args.append(f'Price is below average, but seasonal sales may offer additional bank cashback or bundle deals.')
+        args.append(f'Check if you already own a product that fulfills the same need as {product_name}.')
+        return {'stance': 'WAIT', 'skeptic_verdict': 'Caution Advised', 'arguments': args}
     else:
         return {
             'stance': 'BUY_IF_URGENT',
-            'skeptic_verdict': 'Reasonable if required immediately',
+            'skeptic_verdict': 'Reasonable if needed immediately',
             'arguments': [
-                'If this item is an immediate productivity or necessity item, the price difference is within acceptable tolerance.',
-                'Verified seller has prompt 1-day dispatch.',
-                'Stock on primary retailers is moving fast.'
+                f'If {product_name} is an urgent necessity, the ₹{current - low:,.0f} premium over the low is acceptable.',
+                f'Current price ₹{current:,.0f} is {"above" if current > avg else "below"} the average ₹{avg:,.0f}.',
+                f'Waiting longer risks stock depletion if {product_name} is in high demand.'
             ]
         }
 
-def generate_why_not_buy(current: float, history: list[float], product: dict) -> list[str]:
-    """Generates structured reasons why the user might reconsider purchasing."""
+def generate_why_not_buy(current: float, history: list[float], product: dict, pref=None) -> list[str]:
+    """Generates product-specific reasons why the user might reconsider purchasing."""
+    name = product.get('name', 'this product')
+    category = product.get('category', '')
+
+    # Try AI-powered reasons
+    ai_reasons = _ai_chat_completion(
+        f"Give exactly 4 short reasons (1 sentence each) why someone should NOT buy \"{name}\" "
+        f"(category: {category or 'general'}, price: ₹{current:,.0f}). "
+        f"Be specific to the product. Return ONLY the 4 reasons as a numbered list.",
+        pref=pref
+    )
+
+    if ai_reasons and len(ai_reasons) > 30:
+        reasons = [line.strip().lstrip('0123456789.-) ') for line in ai_reasons.strip().split('\n') if line.strip() and len(line.strip()) > 10][:4]
+        if len(reasons) >= 3:
+            return reasons
+
+    # Fallback: dynamic data-driven reasons
     reasons = []
     if history:
         avg = statistics.mean(history)
         if current > avg:
-            reasons.append(f'Current price is above the observed 30-day average of ₹{avg:,.0f}.')
-    reasons.append('A next-generation refresh or seasonal revision could depreciate this model.')
-    reasons.append('Check if your existing setup or previous purchase already fulfills this functional need.')
-    reasons.append('Accessories or consumables required for full usage may add to the initial price.')
-    return reasons
+            reasons.append(f'Current price ₹{current:,.0f} is above the observed average of ₹{avg:,.0f} for {name}.')
+        low = min(history)
+        if current > low * 1.1:
+            reasons.append(f'{name} has been available for as low as ₹{low:,.0f} — waiting could save ₹{current - low:,.0f}.')
+    reasons.append(f'A newer version of {name} may launch soon, deprecating the current model.')
+    reasons.append(f'Check if your existing setup already fulfills the need that {name} would serve.')
+    if 'electronic' in (category or '').lower():
+        reasons.append(f'Accessories and consumables for {name} may add 5-15% to the initial purchase cost.')
+    return reasons[:4]
 
 def analyze_deal_truth(advertised_price: float, current_price: float, history: list[float]) -> dict:
     """Evaluates reference prices, detects fake discounts and price manipulation."""
@@ -624,115 +462,184 @@ def analyze_deal_truth(advertised_price: float, current_price: float, history: l
         'finding': finding
     }
 
-def calculate_ownership_cost(price: float, category: str) -> dict:
-    """Projects total cost of ownership over 1, 2, 3, and 5 years."""
+def calculate_ownership_cost(price: float, category: str, product_name: str = '', pref=None) -> dict:
+    """Projects total cost of ownership with AI-enhanced estimates when available."""
     is_tech = 'electronic' in category.lower() or 'smartphone' in category.lower() or 'audio' in category.lower() or 'computer' in category.lower()
-    acc = price * 0.08 if is_tech else 0.0
-    maint_yr = price * 0.05 if is_tech else price * 0.02
-    resale_pct = [0.65, 0.45, 0.30, 0.15] if is_tech else [0.50, 0.30, 0.10, 0.0]
+
+    # Try AI for more accurate estimates
+    ai_text = _ai_chat_completion(
+        f"For \"{product_name or category}\" priced at ₹{price:,.0f}, estimate: "
+        f"1) accessory cost as % of price, 2) yearly maintenance cost as % of price, "
+        f"3) resale value after 1,2,3,5 years as % of price. "
+        f"Return ONLY 3 lines: accessories_pct, maintenance_pct, resale_1yr_2yr_3yr_5yr "
+        f"Example: 10\n5\n65,45,30,10",
+        pref=pref
+    )
+
+    acc_pct = 0.08 if is_tech else 0.02
+    maint_pct = 0.05 if is_tech else 0.02
+    resale_pcts = [0.65, 0.45, 0.30, 0.15] if is_tech else [0.50, 0.30, 0.10, 0.0]
+
+    if ai_text:
+        try:
+            lines = [l.strip() for l in ai_text.strip().split('\n') if l.strip()]
+            if len(lines) >= 3:
+                acc_pct = float(re.search(r'\d+', lines[0]).group()) / 100
+                maint_pct = float(re.search(r'\d+', lines[1]).group()) / 100
+                resale_nums = re.findall(r'\d+', lines[2])
+                if len(resale_nums) >= 4:
+                    resale_pcts = [float(x)/100 for x in resale_nums[:4]]
+        except Exception:
+            pass
+
+    acc = price * acc_pct
+    maint_yr = price * maint_pct
 
     return {
         'initial_purchase': price,
         'accessories': round(acc, 2),
         'projections': [
-            {'years': 1, 'maintenance': round(maint_yr * 1, 2), 'resale_estimate': round(price * resale_pct[0], 2), 'net_cost': round(price + acc + maint_yr * 1 - price * resale_pct[0], 2)},
-            {'years': 2, 'maintenance': round(maint_yr * 2, 2), 'resale_estimate': round(price * resale_pct[1], 2), 'net_cost': round(price + acc + maint_yr * 2 - price * resale_pct[1], 2)},
-            {'years': 3, 'maintenance': round(maint_yr * 3, 2), 'resale_estimate': round(price * resale_pct[2], 2), 'net_cost': round(price + acc + maint_yr * 3 - price * resale_pct[2], 2)},
-            {'years': 5, 'maintenance': round(maint_yr * 5, 2), 'resale_estimate': round(price * resale_pct[3], 2), 'net_cost': round(price + acc + maint_yr * 5 - price * resale_pct[3], 2)}
+            {'years': y, 'maintenance': round(maint_yr * y, 2),
+             'resale_estimate': round(price * resale_pcts[i], 2),
+             'net_cost': round(price + acc + maint_yr * y - price * resale_pcts[i], 2)}
+            for i, y in enumerate([1, 2, 3, 5])
         ]
     }
 
-def generate_smart_substitutes(product_name: str, category: str, current_price: float) -> list[dict]:
-    """Recommends 2-3 genuine alternative brands or model substitutes."""
-    p_low = product_name.lower()
+def generate_smart_substitutes(product_name: str, category: str, current_price: float, pref=None) -> list[dict]:
+    """Searches for real alternative products via web search and AI recommendations."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus, urlparse, parse_qs
     cp = max(10.0, float(current_price or 100.0))
-    
-    if category == 'GROCERY':
-        if 'butter' in p_low:
-            return [
-                {'name': 'Mother Dairy Table Butter (500g)', 'brand': 'Mother Dairy', 'price': round(cp * 0.92, 2), 'savings': round(cp * 0.08, 2), 'rating': 4.7, 'type': 'VALUE PICK', 'reason': f'Identical rich pasteurized table butter, saves ₹{int(cp * 0.08)}'},
-                {'name': 'Country Delight Pure Cow Butter (500g)', 'brand': 'Country Delight', 'price': round(cp * 1.15, 2), 'savings': 0, 'rating': 4.9, 'type': 'ORGANIC / A2', 'reason': 'Fresh traditional churned unadulterated cow butter'},
-                {'name': 'President French Gourmet Salted Butter (500g)', 'brand': 'President', 'price': round(cp * 1.35, 2), 'savings': 0, 'rating': 4.8, 'type': 'PREMIUM GOURMET', 'reason': 'Imported European lactic cultured butter for baking'}
-            ]
-        elif 'garlic' in p_low or 'ginger' in p_low:
-            return [
-                {'name': 'Fresh Peeled Organic Garlic (250g)', 'brand': 'Fresh Farm', 'price': round(cp * 0.88, 2), 'savings': round(cp * 0.12, 2), 'rating': 4.8, 'type': 'TIME SAVER', 'reason': f'Ready-to-cook peeled cloves, saves ₹{int(cp * 0.12)}'},
-                {'name': 'Native Country Garlic / Desi Lehsun (500g)', 'brand': 'Organic Tattva', 'price': round(cp * 1.20, 2), 'savings': 0, 'rating': 4.9, 'type': 'HEALTH CHOICE', 'reason': 'High allicin content aromatic mountain native harvest'}
-            ]
-        elif 'tomato' in p_low:
-            return [
-                {'name': 'Local Mandi Grade-A Hybrid Tomatoes (1kg)', 'brand': 'Fresh Mandi', 'price': round(cp * 0.85, 2), 'savings': round(cp * 0.15, 2), 'rating': 4.6, 'type': 'VALUE BULK', 'reason': f'Daily fresh harvest sorted for firm cooking texture (Save ₹{int(cp * 0.15)})'},
-                {'name': 'Hydroponic Vine Ripe Tomatoes (500g)', 'brand': 'Pluckk', 'price': round(cp * 1.25, 2), 'savings': 0, 'rating': 4.9, 'type': 'PESTICIDE FREE', 'reason': 'Zero chemical pesticide residues, sweeter taste profile'}
-            ]
-        else:
-            return [
-                {'name': f'Value Saver Pack: {product_name}', 'brand': 'Market Saver', 'price': round(cp * 0.86, 2), 'savings': round(cp * 0.14, 2), 'rating': 4.6, 'type': 'SMART SAVINGS', 'reason': f'Save ₹{int(cp * 0.14)} with verified comparable quality'},
-                {'name': f'Organic Harvest Edition: {product_name}', 'brand': 'Organic India', 'price': round(cp * 1.18, 2), 'savings': 0, 'rating': 4.9, 'type': 'ORGANIC PICK', 'reason': 'Certified organic cultivation with minimal processing'}
-            ]
-    elif category == 'ELECTRONICS':
-        if 'macbook' in p_low or 'laptop' in p_low:
-            return [
-                {'name': 'ASUS Zenbook 14 OLED (Intel Core Ultra 7 / 16GB)', 'brand': 'ASUS', 'price': round(cp * 0.88, 2), 'savings': round(cp * 0.12, 2), 'rating': 4.7, 'type': 'BEST VALUE PRO', 'reason': f'120Hz 2.8K OLED display + all-day battery (Save ₹{int(cp * 0.12)})'},
-                {'name': 'Lenovo Yoga Slim 7x Copilot+ (Snapdragon X Elite)', 'brand': 'Lenovo', 'price': round(cp * 0.94, 2), 'savings': round(cp * 0.06, 2), 'rating': 4.8, 'type': 'AI CO-PILOT', 'reason': '24-hour battery life and fast on-device neural processing'}
-            ]
-        elif 'iphone' in p_low or 'phone' in p_low or 'mobile' in p_low:
-            return [
-                {'name': 'Samsung Galaxy S24 (8GB / 256GB Galaxy AI)', 'brand': 'Samsung', 'price': round(cp * 0.90, 2), 'savings': round(cp * 0.10, 2), 'rating': 4.8, 'type': 'FLAGSHIP ALTERNATIVE', 'reason': f'7 years OS upgrades, 120Hz LTPO display, Galaxy AI (Save ₹{int(cp * 0.10)})'},
-                {'name': 'OnePlus 12 (16GB / 512GB Snapdragon 8 Gen 3)', 'brand': 'OnePlus', 'price': round(cp * 0.80, 2), 'savings': round(cp * 0.20, 2), 'rating': 4.7, 'type': 'POWER VALUE', 'reason': f'100W SuperVOOC fast charging, 2K ProXDR screen (Save ₹{int(cp * 0.20)})'}
-            ]
-        else:
-            return [
-                {'name': f'Pro Series Equivalent: {product_name}', 'brand': 'NextGen Tech', 'price': round(cp * 0.89, 2), 'savings': round(cp * 0.11, 2), 'rating': 4.7, 'type': 'VALUE MATCH', 'reason': f'Matches technical specifications with verified warranty (Save ₹{int(cp * 0.11)})'},
-                {'name': f'Flagship Edition: {product_name}', 'brand': 'UltraBrand', 'price': round(cp * 1.20, 2), 'savings': 0, 'rating': 4.9, 'type': 'TOP TIER', 'reason': 'Enhanced build quality and extended manufacturer warranty'}
-            ]
-    elif category == 'HEALTH':
-        return [
-            {'name': f'Generic Jan Aushadhi Equivalent: {product_name}', 'brand': 'Jan Aushadhi', 'price': round(cp * 0.45, 2), 'savings': round(cp * 0.55, 2), 'rating': 4.8, 'type': 'GENERIC PHARMA', 'reason': f'Government verified identical active pharmaceutical ingredient (Save ₹{int(cp * 0.55)})'},
-            {'name': f'Extended Release Formulation: {product_name}', 'brand': 'Cipla / Sun Pharma', 'price': round(cp * 0.95, 2), 'savings': round(cp * 0.05, 2), 'rating': 4.9, 'type': 'TRUSTED BRAND', 'reason': 'WHO-GMP certified facility formulation'}
-        ]
-    else:
-        return [
-            {'name': f'Smart Choice Alternative: {product_name}', 'brand': 'TopChoice', 'price': round(cp * 0.88, 2), 'savings': round(cp * 0.12, 2), 'rating': 4.7, 'type': 'VALUE PICK', 'reason': f'Save ₹{int(cp * 0.12)} with matching verified customer reviews'},
-            {'name': f'Premium Craft Edition: {product_name}', 'brand': 'EliteCraft', 'price': round(cp * 1.25, 2), 'savings': 0, 'rating': 4.9, 'type': 'PREMIUM', 'reason': 'Superior materials and extended durability life'}
-        ]
+    results = []
+
+    # Try live search for alternatives
+    try:
+        query = f"alternative to {product_name} price India"
+        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        r = httpx.post(ddg_url, headers=headers, data={'q': query}, timeout=settings.review_search_timeout)
+
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            for res_el in soup.select('.result')[:5]:
+                title_el = res_el.select_one('.result__title a')
+                snippet_el = res_el.select_one('.result__snippet')
+                if not title_el:
+                    continue
+                title = title_el.get_text().strip()
+                snippet = snippet_el.get_text().strip() if snippet_el else ''
+
+                # Skip if it's about the same product
+                if product_name.lower()[:10] in title.lower():
+                    continue
+
+                price_match = re.search(r'(?:₹|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)', snippet, re.I)
+                alt_price = float(price_match.group(1).replace(',', '')) if price_match else cp * 0.9
+                savings = max(0, round(cp - alt_price, 2))
+
+                # Extract brand from title
+                brand = title.split()[0] if title else 'Alternative'
+
+                results.append({
+                    'name': title[:80],
+                    'brand': brand,
+                    'price': round(alt_price, 2),
+                    'savings': savings,
+                    'rating': 0.0,
+                    'type': 'WEB DISCOVERY',
+                    'reason': snippet[:120] if snippet else f'Alternative to {product_name}'
+                })
+                if len(results) >= 3:
+                    break
+    except Exception:
+        pass
+
+    # If web search found nothing, try AI
+    if not results:
+        ai_text = _ai_chat_completion(
+            f"Suggest 3 real alternative products to \"{product_name}\" (category: {category}, "
+            f"price: ₹{cp:,.0f}) available in India. For each, give: product name, brand, "
+            f"estimated price in INR, and one reason to consider it. Format as numbered list.",
+            pref=pref
+        )
+        if ai_text and len(ai_text) > 30:
+            for line in ai_text.strip().split('\n'):
+                line = line.strip().lstrip('0123456789.-) ')
+                if len(line) > 10 and len(results) < 3:
+                    price_m = re.search(r'(?:₹|Rs\.?)\s*([\d,]+)', line, re.I)
+                    alt_price = float(price_m.group(1).replace(',', '')) if price_m else cp * 0.9
+                    results.append({
+                        'name': line[:80], 'brand': 'AI Suggestion',
+                        'price': round(alt_price, 2), 'savings': max(0, round(cp - alt_price, 2)),
+                        'rating': 0.0, 'type': 'AI RECOMMENDATION', 'reason': line[:120]
+                    })
+
+    return results or [{'name': f'Search for alternatives to {product_name}', 'brand': 'Web Search',
+                        'price': cp, 'savings': 0, 'rating': 0.0, 'type': 'MANUAL SEARCH',
+                        'reason': 'No alternatives found automatically — try searching manually'}]
 
 def calculate_sustainability_score(category: str, product_name: str, store_name: str = '') -> dict:
-    """Calculates comprehensive environmental footprint and sustainability metrics."""
-    is_grocery = category == 'GROCERY'
-    is_tech = category == 'ELECTRONICS'
-    
-    if is_grocery:
-        eco_grade = 'A+' if any(k in store_name.lower() for k in ['blinkit', 'zepto', 'instamart']) else 'A'
-        packaging = '100% Biodegradable Cornstarch / Recycled Paper Bag'
-        carbon_co2 = '65g CO₂ (Local EV Fleet Delivery)'
-        repairability = 10.0
-        durability = 'Fresh Consumption (3-7 days)'
-        badge = '🌱 Zero-Plastic Fleet Dispatched'
-        eco_points = 94
-    elif is_tech:
-        eco_grade = 'B+'
-        packaging = 'FSC-Certified 98% Recycled Fiber Carton'
-        carbon_co2 = '1.8kg CO₂ (Consolidated Ground Transport)'
-        repairability = 7.5
-        durability = '4-6 Years Expected Lifecycle'
-        badge = '⚡ Energy Star 5-Star Certified'
-        eco_points = 82
-    elif category == 'HEALTH':
-        eco_grade = 'A'
-        packaging = 'Amber Glass / Recyclable HDPE Blister'
-        carbon_co2 = '95g CO₂ (Local Pharmacy Courier)'
-        repairability = 10.0
-        durability = '24-Month Shelf Life'
-        badge = '🌿 Eco-Pharma Compliant'
-        eco_points = 89
-    else:
-        eco_grade = 'B'
-        packaging = 'Minimal Corrugated Recyclable Box'
-        carbon_co2 = '320g CO₂ (Regional Road Logistics)'
-        repairability = 8.0
-        durability = '2-4 Years Typical Usage'
-        badge = '♻️ Recyclable Packaging'
-        eco_points = 78
+    """Returns honest sustainability data — searches web for real eco data, admits when unavailable."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus
+
+    eco_grade = 'N/A'
+    eco_points = 0
+    packaging = 'Data not available'
+    carbon_co2 = 'Not measured'
+    repairability = 0.0
+    durability = 'Not assessed'
+    badge = '📊 Pending Assessment'
+    highlights = []
+
+    # Try to find real sustainability data via web search
+    try:
+        query = f'"{product_name}" sustainability eco carbon footprint recyclable'
+        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        r = httpx.post(ddg_url, headers=headers, data={'q': query}, timeout=settings.review_search_timeout)
+
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            snippets = []
+            for res_el in soup.select('.result')[:4]:
+                snippet_el = res_el.select_one('.result__snippet')
+                if snippet_el:
+                    snippets.append(snippet_el.get_text().strip())
+
+            combined = ' '.join(snippets).lower()
+
+            # Extract real data from snippets
+            if 'energy star' in combined:
+                highlights.append('Energy Star certified product')
+                eco_points += 20
+            if 'recycl' in combined:
+                highlights.append('Recyclable materials or packaging mentioned')
+                eco_points += 15
+            if 'carbon neutral' in combined or 'net zero' in combined:
+                highlights.append('Carbon neutral or net-zero commitment')
+                eco_points += 25
+            if 'repairab' in combined:
+                rep_match = re.search(r'repairability[:\s]+([\d.]+)', combined)
+                repairability = float(rep_match.group(1)) if rep_match else 6.0
+                highlights.append(f'Repairability score: {repairability}/10')
+                eco_points += 15
+
+            co2_match = re.search(r'(\d+\.?\d*)\s*(?:kg|g)\s*co2', combined, re.I)
+            if co2_match:
+                carbon_co2 = f'{co2_match.group(0)}'
+                eco_points += 10
+
+            if eco_points > 0:
+                eco_grade = 'A+' if eco_points >= 60 else 'A' if eco_points >= 45 else 'B+' if eco_points >= 30 else 'B' if eco_points >= 15 else 'C'
+                badge = '🌱 Eco Data Found' if eco_points >= 30 else '📊 Partial Data'
+    except Exception:
+        pass
+
+    if not highlights:
+        highlights = [f'No sustainability data found for {product_name}.', 'Check manufacturer website for eco certifications.']
+        badge = '⚠️ No Eco Data Available'
 
     return {
         'eco_grade': eco_grade,
@@ -742,11 +649,7 @@ def calculate_sustainability_score(category: str, product_name: str, store_name:
         'repairability_score': repairability,
         'durability': durability,
         'eco_badge': badge,
-        'highlights': [
-            'Eco-optimized logistics routing reduces transport emissions by up to 40%.',
-            'Packaging conforms to Extended Producer Responsibility (EPR) recycling standards.',
-            'Consolidated multi-store cart bundling minimizes single-parcel courier runs.'
-        ]
+        'highlights': highlights
     }
 
 def parse_invoice_text(text: str) -> dict:
@@ -826,7 +729,7 @@ def parse_invoice_text(text: str) -> dict:
         date_str = date_match.group(1)
 
     for l in lines:
-        m_price = re.search(r'([A-Za-z0-9\s,-]+)[\s:₹]+([0-9]+(?:\.[0-9]{1,2})?)', l)
+        m_price = re.search(r'([A-Za-z0-9\s,-]+)[\s:â‚¹]+([0-9]+(?:\.[0-9]{1,2})?)', l)
         if m_price:
             name_part = m_price.group(1).strip()
             price_part = float(m_price.group(2))
@@ -874,23 +777,43 @@ def parse_invoice_text(text: str) -> dict:
         'status': 'VERIFIED'
     }
 
-def check_compatibility(product_name: str, specs: str) -> dict:
-    """Verifies interface and standard compatibility for the product."""
-    notes = []
+def check_compatibility(product_name: str, specs: str, pref=None) -> dict:
+    """AI-powered compatibility assessment for the product."""
     p_low = product_name.lower()
     s_low = specs.lower()
 
-    if 'usb-c' in p_low or 'usb-c' in s_low:
-        notes.append('Supports Universal USB-C Power Delivery and Fast Charging.')
-    if 'bluetooth' in p_low or 'bluetooth' in s_low:
-        notes.append('Backwards-compatible with all standard Bluetooth 4.0+ devices (iOS, Android, Windows, Mac).')
-    if 'anc' in s_low or 'noise-cancelling' in p_low:
-        notes.append('Requires companion mobile application for full EQ and ANC tuning.')
+    # Try AI-powered compatibility check
+    ai_result = _ai_chat_completion(
+        f"Assess the compatibility of \"{product_name}\" (specs: {specs or 'not specified'}). "
+        f"List 2-3 compatibility notes: what devices/systems it works with, any requirements, "
+        f"and any known incompatibilities. Keep each note to 1 sentence. Return as numbered list.",
+        pref=pref
+    )
+
+    if ai_result and len(ai_result) > 20:
+        notes = [line.strip().lstrip('0123456789.-) ') for line in ai_result.strip().split('\n') if line.strip() and len(line.strip()) > 10][:4]
+        if notes:
+            return {'status': 'ASSESSED', 'confidence': 'AI', 'notes': notes}
+
+    # Fallback: comprehensive keyword analysis
+    notes = []
+    if 'usb-c' in p_low or 'usb-c' in s_low or 'type-c' in s_low:
+        notes.append(f'{product_name} supports USB-C — compatible with modern laptops, phones, and tablets.')
+    if 'bluetooth' in p_low or 'bluetooth' in s_low or 'wireless' in p_low:
+        notes.append(f'{product_name} uses Bluetooth — works with iOS, Android, Windows, and Mac devices.')
+    if 'anc' in s_low or 'noise-cancelling' in p_low or 'noise cancelling' in p_low:
+        notes.append(f'{product_name} has ANC — may require companion app for full noise cancellation tuning.')
+    if 'wifi' in s_low or 'wi-fi' in s_low:
+        notes.append(f'{product_name} has Wi-Fi — ensure your router supports the required standard.')
+    if 'android' in s_low:
+        notes.append(f'{product_name} runs Android — compatible with Google Play Store ecosystem.')
+    if 'ios' in s_low or 'iphone' in p_low or 'ipad' in p_low:
+        notes.append(f'{product_name} is an Apple product — best with Apple ecosystem devices.')
 
     return {
-        'status': 'COMPATIBLE',
-        'confidence': 'HIGH',
-        'notes': notes or ['Standard universal consumer compatibility.']
+        'status': 'COMPATIBLE' if notes else 'UNKNOWN',
+        'confidence': 'MEDIUM' if notes else 'LOW',
+        'notes': notes or [f'No specific compatibility data found for {product_name}. Check product specifications.']
     }
 
 def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
@@ -930,7 +853,7 @@ def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
             snippet = snippet_el.get_text().strip() if snippet_el else ''
             href = title_el.get('href', '')
 
-            # DuckDuckGo wraps URLs in a redirect — extract the actual URL
+            # DuckDuckGo wraps URLs in a redirect â€” extract the actual URL
             actual_url = href
             if 'uddg=' in href:
                 from urllib.parse import parse_qs, urlparse as up
@@ -1089,7 +1012,7 @@ def _extract_pros_cons(snippets: list[str], product_name: str) -> dict:
 
     for snippet in snippets:
         s_low = snippet.lower()
-        source_match = re.search(r'^(.+?)(?:\s*[-–|]\s*|\s*:\s*)', snippet)
+        source_match = re.search(r'^(.+?)(?:\s*[-â€“|]\s*|\s*:\s*)', snippet)
         source = source_match.group(1)[:30] if source_match else 'Review Source'
 
         for pattern, category in pro_patterns:
@@ -1163,7 +1086,7 @@ def _ai_chat_completion(prompt: str, pref=None) -> str:
         except Exception:
             pass
 
-    # 4. Builtin — no LLM available, return empty
+    # 4. Builtin â€” no LLM available, return empty
     return ''
 
 
@@ -1216,7 +1139,7 @@ def get_review_intelligence(product_name: str, category: str = '', pref=None) ->
     positive_count += sum(1 for y in youtube if 'positive' in (y.get('sentiment', '')).lower())
 
     if total_reviews == 0:
-        overall = f'NO REVIEWS FOUND — Try a more specific product name'
+        overall = f'NO REVIEWS FOUND â€” Try a more specific product name'
         summary = f'No live reviews could be found for "{product_name}". Try adding the brand name or model number for better results.'
     elif positive_count / max(total_reviews, 1) >= 0.6:
         overall = f'POSITIVE ({positive_count}/{total_reviews} favorable across {len(articles)} articles + {len(youtube)} videos)'
@@ -1323,15 +1246,52 @@ class DynamicUserAIProvider(AIProvider):
             pass
         return deterministic_parse(text)
 
+class OpenAICompatibleProvider(AIProvider):
+    """Server-configured Custom AI / LLM Provider"""
+    name = 'openai_compatible'
+    def __init__(self):
+        self.base_url = (settings.ai_api_base_url or 'https://api.openai.com/v1').rstrip('/')
+        self.api_key = settings.ai_api_key or ''
+        self.model = settings.ai_api_model or 'gpt-4o-mini'
+
+    def parse(self, text: str):
+        if not self.api_key:
+            return deterministic_parse(text)
+        try:
+            payload = {
+                'model': self.model,
+                'temperature': 0,
+                'response_format': {'type': 'json_object'},
+                'messages': [
+                    {'role': 'system', 'content': 'Return only a JSON object with keys: name (string), quantity (integer), target_price (number or null), max_price (number or null), mode ("BUY_NOW" or "MONITOR"), purchase_mode ("ASK", "AUTO", or "MONITOR_ONLY").'},
+                    {'role': 'user', 'content': text}
+                ]
+            }
+            r = httpx.post(
+                f"{self.base_url}/chat/completions",
+                headers={'Authorization': f'Bearer {self.api_key}', 'Content-Type': 'application/json'},
+                json=payload,
+                timeout=12.0
+            )
+            r.raise_for_status()
+            raw = r.json()['choices'][0]['message']['content']
+            import json
+            obj = json.loads(raw)
+            if isinstance(obj, dict) and obj.get('name'):
+                return obj
+        except Exception:
+            pass
+        return deterministic_parse(text)
+
 def deterministic_parse(text):
-    prices = [float(x.replace(',', '')) for x in re.findall(r'(?:₹|Rs\.?|INR\s*)\s*([\d,]+(?:\.\d+)?)', text, re.I)]
+    prices = [float(x.replace(',', '')) for x in re.findall(r'(?:â‚¹|Rs\.?|INR\s*)\s*([\d,]+(?:\.\d+)?)', text, re.I)]
     low = text.lower()
     mode = 'MONITOR' if any(k in low for k in ['monitor', 'when it falls', 'below']) else 'BUY_NOW'
     purchase = 'AUTO' if ('auto' in low or 'automatically' in low) else 'MONITOR_ONLY' if 'monitor only' in low else 'ASK'
     qmatch = re.search(r'\b(\d+)\s*(?:x|units?|items?)\b', low)
     q = int(qmatch.group(1)) if qmatch else 1
     cleaned = re.sub(r"\b(find|the|cheapest|price|monitor|buy|automatically|auto-buy|auto|when|it|falls|below|under|and|ask|me|before|buying|don't|purchase|anything|for|rs\.?|inr)\b", ' ', text, flags=re.I)
-    cleaned = re.sub(r'(₹\s*[\d,]+(?:\.\d+)?)', ' ', cleaned)
+    cleaned = re.sub(r'(â‚¹\s*[\d,]+(?:\.\d+)?)', ' ', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip(' .,-')
     return {'name': cleaned or text, 'quantity': q, 'target_price': prices[0] if prices else None, 'max_price': prices[1] if len(prices) > 1 else None, 'mode': mode, 'purchase_mode': purchase}
 
