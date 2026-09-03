@@ -953,17 +953,19 @@ def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
     return results
 
 def _search_youtube_reviews(product_name: str, timeout: int = 10) -> list[dict]:
-    """Search DuckDuckGo Lite for real YouTube review videos and return structured results."""
-    from urllib.parse import urlparse
+    """Search for real YouTube review videos and return structured results with direct watch URLs."""
+    import json
+    from urllib.parse import quote_plus
     videos = []
+    clean_name = re.split(r"[:|;(\[]", product_name)[0].strip() or product_name[:40]
 
-    # If YouTube API key is available, use official Data API v3
+    # 1. Official YouTube Data API v3 (if configured)
     if settings.youtube_api_key:
         try:
             yt_url = "https://www.googleapis.com/youtube/v3/search"
             params = {
                 'part': 'snippet',
-                'q': f"{product_name} review",
+                'q': f"{clean_name} review",
                 'type': 'video',
                 'maxResults': 5,
                 'relevanceLanguage': 'en',
@@ -989,9 +991,56 @@ def _search_youtube_reviews(product_name: str, timeout: int = 10) -> list[dict]:
         except Exception:
             pass
 
-    # DuckDuckGo Lite fallback for YouTube videos
+    # 2. Direct live YouTube search extraction via ytInitialData
     try:
-        clean_name = re.split(r"[:|;(\[]", product_name)[0].strip() or product_name[:40]
+        yt_search_url = f"https://www.youtube.com/results?search_query={quote_plus(clean_name)}+review"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
+        r = httpx.get(yt_search_url, headers=headers, timeout=timeout)
+        if r.status_code == 200:
+            m = re.search(r'var ytInitialData = ({.*?});</script>', r.text)
+            if m:
+                data = json.loads(m.group(1))
+                def _find_renderers(obj):
+                    if isinstance(obj, dict):
+                        if 'videoRenderer' in obj:
+                            yield obj['videoRenderer']
+                        for v in obj.values():
+                            yield from _find_renderers(v)
+                    elif isinstance(obj, list):
+                        for it in obj:
+                            yield from _find_renderers(it)
+
+                for v in _find_renderers(data):
+                    if len(videos) >= 6:
+                        break
+                    vid_id = v.get('videoId')
+                    if not vid_id:
+                        continue
+                    title = v.get('title', {}).get('runs', [{}])[0].get('text', '').strip()
+                    channel = v.get('ownerText', {}).get('runs', [{}])[0].get('text', 'YouTube Tech Reviewer').strip()
+                    desc = ''
+                    desc_snippets = v.get('detailedMetadataSnippets', [])
+                    if desc_snippets:
+                        desc = desc_snippets[0].get('snippetText', {}).get('runs', [{}])[0].get('text', '').strip()
+                    if not desc:
+                        desc_runs = v.get('descriptionSnippet', {}).get('runs', [])
+                        if desc_runs:
+                            desc = ''.join(r.get('text', '') for r in desc_runs).strip()
+                    videos.append({
+                        'channel': channel,
+                        'video_title': title,
+                        'video_id': vid_id,
+                        'url': f"https://www.youtube.com/watch?v={vid_id}",
+                        'findings': desc or f"Live video review and benchmark analysis by {channel}.",
+                        'published_at': 'Recent'
+                    })
+                if videos:
+                    return videos
+    except Exception:
+        pass
+
+    # 3. Universal Web Search Fallback for YouTube links
+    try:
         query = f"{clean_name} review site:youtube.com"
         search_results = duckduckgo_search(query, timeout=timeout)
 
@@ -1028,7 +1077,7 @@ def _search_youtube_reviews(product_name: str, timeout: int = 10) -> list[dict]:
                 'video_title': clean_title,
                 'video_id': vid_id,
                 'url': actual_url,
-                'findings': snippet,
+                'findings': snippet or f"YouTube review for {clean_name}",
                 'published_at': 'Recent',
             })
     except Exception:
