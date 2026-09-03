@@ -842,13 +842,15 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  it.completed_at = now() if hasattr(it, 'completed_at') else datetime.now(timezone.utc)
  db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Purchase initiated for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). User action required to complete. Verified savings: ₹{savings_val:,.2f}."))
  db.commit()
+ store_target_url = best.get('url', '')
  return {
   'status': 'PENDING_USER_ACTION',
   'order_number': order_num,
-  'message': f"Please complete the purchase on the retailer site: {best.get('store', 'Retailer')}. Saved ₹{savings_val:,.2f}.",
+  'message': f"Opening {best.get('store', 'retailer')} to complete purchase (Saved ₹{savings_val:,.2f}).",
   'product': it.name,
   'store': best.get('store', 'Retailer'),
-  'url': best.get('url', ''),
+  'url': store_target_url,
+  'store_url': store_target_url,
   'total': total_price,
   'is_gift': ord_rec.is_gift,
   'gift_recipient': ord_rec.gift_recipient

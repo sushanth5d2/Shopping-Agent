@@ -438,9 +438,10 @@ export default function App() {
         method: 'POST',
         headers: { 'Idempotency-Key': crypto.randomUUID() }
       });
-      setToast(x.message || 'Order processing...');
-      if (x.store_url) {
-        window.open(x.store_url, '_blank');
+      setToast(x.message || 'Opening retailer store...');
+      const targetUrl = x.store_url || x.url;
+      if (targetUrl) {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
       }
       await load();
     } catch (e: any) {
