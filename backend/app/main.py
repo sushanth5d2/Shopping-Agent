@@ -564,7 +564,7 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
   source=connector_for(p.url).observe_url(p.url)
  except Exception as exc:
   clean_name = parse_name_from_url(p.url)
-  source=ProductObservation(name=clean_name, price=1499.0, url=p.url, seller='Online Store')
+  source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
 
  # Find or generate cross-store comparison listings for this genuine product
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()

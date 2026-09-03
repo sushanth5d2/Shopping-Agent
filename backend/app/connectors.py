@@ -147,16 +147,27 @@ class JsonLdWebConnector(StoreConnector):
             h1 = soup.find('h1', id='title') or soup.find('span', id='productTitle') or soup.find('h1')
             if h1:
                 name = h1.get_text().strip()
+
+        # Initialize price from JSON-LD early so DuckDuckGo search can fill it if missing
+        price = offers.get('price') if isinstance(offers, dict) else None
+
         # If direct page was bot-blocked (CAPTCHA or empty title), resolve genuine title via search
-        if not name or name in ['Product Online', 'Amazon.in', 'Online Shopping site in India']:
-            asin_m = re.search(r'\b(B0[A-Z0-9]{8})\b', final_url)
+        if not name or name in ['Product Online', 'Amazon.in', 'Online Shopping site in India', '']:
+            # Extract ASIN from full URL (handles both /dp/B0XXXXXXXX and amzn.in redirect)
+            asin_m = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', final_url)
+            if not asin_m:
+                asin_m = re.search(r'\b(B0[A-Z0-9]{8})\b', final_url)
             asin = asin_m.group(1) if asin_m else ''
             
-            # Extract product title via live search resolution
+            # Extract product title and price via live DuckDuckGo search
             try:
                 import httpx
                 from urllib.parse import quote_plus
-                q = f"amazon.in dp {asin}" if asin else final_url
+                # Use ASIN if available, otherwise use the full URL for search
+                if asin:
+                    q = f"amazon.in {asin}"
+                else:
+                    q = f"amazon.in {final_url.split('/')[-1] if '/' in final_url else final_url}"
                 ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(q)}"
                 ddg_r = httpx.post(ddg_url, headers={'User-Agent': headers['User-Agent']}, data={'q': q}, timeout=8)
                 if ddg_r.status_code == 200:
@@ -164,12 +175,13 @@ class JsonLdWebConnector(StoreConnector):
                     for res in ddg_soup.select('.result'):
                         t_el = res.select_one('.result__title')
                         s_el = res.select_one('.result__snippet')
-                        u_el = res.select_one('.result__url')
                         t_text = t_el.get_text().strip() if t_el else ''
                         s_text = s_el.get_text().strip() if s_el else ''
-                        if t_text and not any(k in t_text.lower() for k in ['order online', 'ad clicks', 'shop online for mobiles']):
-                            clean_t = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in|\s*-\s*Amazon).*$', '', t_text, flags=re.I).strip()
-                            if len(clean_t) > 3:
+                        if t_text and not any(k in t_text.lower() for k in ['order online', 'ad clicks', 'shop online for mobiles', 'customer reviews']):
+                            # Clean title: remove "Amazon.in", "Flipkart", etc.
+                            clean_t = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in|\s*-\s*Amazon|\s*Buy\s+).*$', '', t_text, flags=re.I).strip()
+                            clean_t = re.sub(r'^(Buy\s+|Amazon\.in\s*:\s*)', '', clean_t, flags=re.I).strip()
+                            if len(clean_t) > 5:
                                 name = clean_t
                                 # Try extracting price from snippet
                                 price_match = re.search(r'(?:₹|Rs\.?|INR)\s*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{2})?|[0-9]{3,7})', s_text)
@@ -182,8 +194,9 @@ class JsonLdWebConnector(StoreConnector):
         if not name or name in ['Product Online', 'Amazon.in']:
             name = clean_title or parse_name_from_url(final_url)
 
-        # 5. Extract Price
-        price = offers.get('price') if isinstance(offers, dict) else None
+        # 5. Extract Price (only if not already found from search above)
+        if price is None:
+            price = offers.get('price') if isinstance(offers, dict) else None
 
         if price is None and soup:
             # Meta tags
