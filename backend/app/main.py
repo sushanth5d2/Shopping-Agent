@@ -651,8 +651,13 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  deal_truth=analyze_deal_truth(best.get('price',current_price)*1.3,current_price,hist)
  ownership=calculate_ownership_cost(current_price,p.category or 'Electronics')
  compat=check_compatibility(p.name,p.specs or '')
- reviews=get_review_intelligence(p.name, p.category or 'General')
- seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':'Verified 1-2 Day Dispatch','return_satisfaction':'96% Positive Resolution'}
+ pref=db.query(UserPreference).filter_by(user_id=u.id).first()
+ reviews=get_review_intelligence(p.name, p.category or 'General', pref=pref)
+ # Derive seller trust from real listing data
+ best_listing = db.query(StoreListing).filter_by(product_id=product_id).order_by(StoreListing.price.asc()).first()
+ delivery_days = best_listing.delivery_days if best_listing and best_listing.delivery_days else 2
+ returns_policy = best_listing.returns if best_listing and best_listing.returns else '7-day return policy'
+ seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':f'Estimated {delivery_days}-day delivery','return_satisfaction':returns_policy}
  substitutes = c.get('substitutes', [])
  sustainability = c.get('sustainability', {})
  return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'substitutes':substitutes,'sustainability':sustainability,'price_history':hist}

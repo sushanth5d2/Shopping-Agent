@@ -886,6 +886,9 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
   const dealTruth = data.deal_truth || {};
   const ownership = data.ownership_cost || {};
   const reviews = data.reviews || {};
+  const pros = reviews.pros || [];
+  const cons = reviews.cons || [];
+  const aiSuggestion = reviews.ai_suggestion || '';
 
   return (
     <div className="stack">
@@ -1032,6 +1035,55 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
           ))}
         </div>
       </div>
+
+      {/* Pros & Cons Analysis */}
+      {(pros.length > 0 || cons.length > 0) && (
+        <div className="panel" style={{ borderColor: '#6366f1' }}>
+          <div className="panel-head">
+            <div><span className="eyebrow" style={{ color: '#818cf8' }}>REVIEW ANALYSIS</span><h3>Pros &amp; Cons</h3></div>
+            <span className="status purple">{pros.length + cons.length} Points Extracted</span>
+          </div>
+          <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <h4 style={{ color: '#22c55e', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>✅ PROS</h4>
+              {pros.length === 0 && <p style={{ fontSize: 12, color: '#64748b' }}>No pros extracted from current review snippets.</p>}
+              {pros.map((p: any, i: number) => (
+                <div key={i} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #1e293b' }}>
+                  <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 500 }}>{p.point}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, display: 'flex', gap: 8 }}>
+                    <span style={{ color: '#818cf8' }}>{p.category}</span>
+                    <span>· {p.source}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <h4 style={{ color: '#f59e0b', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>❌ CONS</h4>
+              {cons.length === 0 && <p style={{ fontSize: 12, color: '#64748b' }}>No cons extracted from current review snippets.</p>}
+              {cons.map((c: any, i: number) => (
+                <div key={i} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #1e293b' }}>
+                  <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 500 }}>{c.point}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, display: 'flex', gap: 8 }}>
+                    <span style={{ color: '#f59e0b' }}>{c.category}</span>
+                    <span>· {c.source}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI-Powered Suggestion */}
+      {aiSuggestion && (
+        <div className="panel" style={{ borderColor: '#a78bfa' }}>
+          <div className="panel-head">
+            <div><span className="eyebrow" style={{ color: '#a78bfa' }}>AI REVIEW INTELLIGENCE</span><h3>AI Suggestion</h3></div>
+            <Sparkles size={18} color="#a78bfa" />
+          </div>
+          <p style={{ fontSize: 14, color: '#e2e8f0', lineHeight: 1.7, margin: 0 }}>{aiSuggestion}</p>
+        </div>
+      )}
 
       {/* Sustainability & Eco Guardian */}
       {data.sustainability && (

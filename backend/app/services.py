@@ -893,72 +893,350 @@ def check_compatibility(product_name: str, specs: str) -> dict:
         'notes': notes or ['Standard universal consumer compatibility.']
     }
 
-def get_review_intelligence(product_name: str, category: str = '') -> dict:
-    """Generates structured review intelligence with real provenance links and category-specific analysis."""
-    p_low = product_name.lower()
-    cat_low = category.lower() if category else ''
-    
-    # Check if Groceries / Food / Daily Essentials
-    is_grocery = any(k in p_low or k in cat_low for k in [
-        'garlic', 'bread', 'jam', 'tomato', 'potato', 'onion', 'rice', 'dal', 'oil',
-        'sugar', 'salt', 'butter', 'milk', 'cheese', 'grocery', 'fruit', 'vegetable', 'snack'
-    ])
+def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
+    """Search DuckDuckGo HTML for real product reviews and return structured results."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus, urlparse
+    results = []
+    try:
+        query = f"{product_name} review 2025 2026"
+        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
+        r = httpx.post(ddg_url, headers=headers, data={'q': query}, timeout=timeout)
+        if r.status_code != 200:
+            return results
+        soup = BeautifulSoup(r.text, 'html.parser')
 
-    if is_grocery:
-        sources = [
-            {'source': 'FSSAI & Food Quality Lab', 'type': 'Safety & Purity Standard', 'url': 'https://fssai.gov.in', 'sentiment': 'Certified Grade A', 'finding': '100% compliant with food safety, freshness retention, and zero artificial adulterants.'},
-            {'source': 'Verified Household Buyers', 'type': 'Pantry Quality Rating', 'url': 'https://www.blinkit.com', 'sentiment': 'Positive (4.7/5)', 'finding': 'Consistently fresh stock delivered within 10-15 minutes with long shelf life.'},
-            {'source': 'Consumer Pantry Survey', 'type': 'Taste & Freshness Review', 'url': 'https://www.bigbasket.com', 'sentiment': 'Positive (4.6/5)', 'finding': 'High repeat purchase rate; authentic flavor and moisture balance verified.'}
-        ]
-        youtube = [
-            {'channel': 'Pantry & Recipe Kitchen', 'title': f'Freshness & Quality Check: {product_name.title()}', 'url': f'https://www.youtube.com/results?search_query={urllib.parse.quote(product_name + " quality freshness review")}', 'sentiment': 'Fresh & Authentic', 'findings': 'High quality batches with intact packaging and optimal shelf life.'}
-        ]
-        return {
-            'overall_sentiment': 'FRESH & VERIFIED (92% Buyer Satisfaction)',
-            'summary': f'High repeat-buy rating across Blinkit, Instamart, and Zepto. Verified fresh batch with optimal expiration dates.',
-            'articles': sources,
-            'youtube_reviews': youtube
+        # Known review domains with human-readable source names
+        review_domains = {
+            'gsmarena.com': 'GSMArena', 'theverge.com': 'The Verge', 'tomsguide.com': "Tom's Guide",
+            'rtings.com': 'RTINGS.com', 'pcmag.com': 'PCMag', 'techradar.com': 'TechRadar',
+            'soundguys.com': 'SoundGuys', 'cnet.com': 'CNET', 'ndtv.com': 'NDTV Gadgets',
+            'digit.in': 'Digit.in', '91mobiles.com': '91Mobiles', 'gadgets360.com': 'Gadgets 360',
+            'smartprix.com': 'Smartprix', 'notebookcheck.net': 'Notebookcheck',
+            'amazon.in': 'Amazon India Reviews', 'flipkart.com': 'Flipkart Reviews',
+            'youtube.com': None,  # Skip YouTube here, handled separately
         }
 
-    # Curated real verified review sources for Electronics & Gadgets
-    if 'sony' in p_low or 'headphone' in p_low:
-        sources = [
-            {'source': 'RTINGS.com', 'type': 'Laboratory Audio Review', 'url': 'https://www.rtings.com/headphones', 'sentiment': 'Positive (8.8/10)', 'finding': 'Class-leading ANC, exceptional comfort and deep bass response.'},
-            {'source': 'The Verge', 'type': 'Tech Publication', 'url': 'https://www.theverge.com/reviews', 'sentiment': 'Positive (9.0/10)', 'finding': 'Refined design, multipoint connection works flawlessly.'},
-            {'source': 'SoundGuys', 'type': 'Acoustic Analysis', 'url': 'https://www.soundguys.com', 'sentiment': 'Positive (8.6/10)', 'finding': 'Great microphone clarity in noisy environments; default EQ slightly warm.'}
-        ]
-        youtube = [
-            {'channel': 'MKBHD', 'title': f'{product_name.title()}: Full Review', 'url': f'https://www.youtube.com/results?search_query={urllib.parse.quote(product_name + " mkbhd review")}', 'sentiment': 'Very Positive', 'findings': 'ANC is unmatched for flights and daily commuting.'},
-            {'channel': 'Dave2D', 'title': f'{product_name.title()} - Worth Buying?', 'url': f'https://www.youtube.com/results?search_query={urllib.parse.quote(product_name + " dave2d review")}', 'sentiment': 'Balanced', 'findings': 'Major upgrade if on older models with top-tier battery endurance.'}
-        ]
-    elif 'iphone' in p_low or 'apple' in p_low or 'phone' in p_low or 'mobile' in p_low or 'samsung' in p_low:
-        sources = [
-            {'source': 'GSMArena', 'type': 'Hardware Lab', 'url': 'https://www.gsmarena.com', 'sentiment': 'Positive (9.1/10)', 'finding': 'Display brightness, camera sensors, and battery efficiency are peak tier.'},
-            {'source': 'Tom\'s Guide', 'type': 'Benchmark Review', 'url': 'https://www.tomsguide.com', 'sentiment': 'Positive (9.2/10)', 'finding': 'Exceptional gaming and processing performance; flagship build quality.'}
-        ]
-        youtube = [
-            {'channel': 'MKBHD', 'title': f'{product_name.title()} Deep Dive & Camera Test', 'url': f'https://www.youtube.com/results?search_query={urllib.parse.quote(product_name + " review")}', 'sentiment': 'Positive', 'findings': 'Outstanding performance, display fluidity, and long-term software support.'}
-        ]
-    elif 'logitech' in p_low or 'mouse' in p_low or 'laptop' in p_low or 'dell' in p_low or 'macbook' in p_low:
-        sources = [
-            {'source': 'PCMag', 'type': 'Hardware Review', 'url': 'https://www.pcmag.com', 'sentiment': 'Editor\'s Choice (4.5/5)', 'finding': 'Top-tier ergonomics, high-precision tracking, and exceptional build quality.'}
-        ]
-        youtube = [
-            {'channel': 'Tech Reviewer', 'title': f'Complete Hands-on: {product_name.title()}', 'url': f'https://www.youtube.com/results?search_query={urllib.parse.quote(product_name + " review")}', 'sentiment': 'Very Positive', 'findings': 'Ergonomics and battery life cannot be beaten for daily workflows.'}
-        ]
+        for res_el in soup.select('.result'):
+            if len(results) >= 8:
+                break
+            title_el = res_el.select_one('.result__title a')
+            snippet_el = res_el.select_one('.result__snippet')
+            if not title_el:
+                continue
+
+            title = title_el.get_text().strip()
+            snippet = snippet_el.get_text().strip() if snippet_el else ''
+            href = title_el.get('href', '')
+
+            # DuckDuckGo wraps URLs in a redirect — extract the actual URL
+            actual_url = href
+            if 'uddg=' in href:
+                from urllib.parse import parse_qs, urlparse as up
+                parsed = up(href)
+                qs = parse_qs(parsed.query)
+                actual_url = qs.get('uddg', [href])[0]
+
+            if not actual_url or not actual_url.startswith('http'):
+                continue
+
+            host = (urlparse(actual_url).hostname or '').lower().replace('www.', '')
+
+            # Skip ads and generic shopping results
+            if any(k in title.lower() for k in ['order online', 'ad clicks', 'shop online for mobiles', 'buy online']):
+                continue
+            # Skip YouTube (handled in _search_youtube_reviews)
+            if 'youtube.com' in host or 'youtu.be' in host:
+                continue
+
+            # Determine source name
+            source_name = None
+            for domain, name in review_domains.items():
+                if domain in host:
+                    source_name = name
+                    break
+            if not source_name:
+                source_name = host.split('.')[0].capitalize() if host else 'Web Review'
+
+            # Determine review type
+            review_type = 'Expert Review'
+            if 'amazon' in host or 'flipkart' in host:
+                review_type = 'Buyer Reviews'
+            elif any(k in host for k in ['reddit', 'quora']):
+                review_type = 'Community Discussion'
+
+            # Detect sentiment from snippet keywords
+            s_low = snippet.lower()
+            pos_count = sum(1 for k in ['excellent', 'great', 'best', 'fantastic', 'impressive', 'love', 'perfect', 'outstanding', 'top', 'recommend', 'good'] if k in s_low)
+            neg_count = sum(1 for k in ['poor', 'bad', 'worst', 'disappointing', 'issue', 'problem', 'avoid', 'terrible', 'overpriced', 'mediocre', 'cons'] if k in s_low)
+            if pos_count > neg_count:
+                sentiment = 'Positive'
+            elif neg_count > pos_count:
+                sentiment = 'Mixed / Critical'
+            else:
+                sentiment = 'Neutral'
+
+            results.append({
+                'source': source_name,
+                'type': review_type,
+                'url': actual_url,
+                'sentiment': sentiment,
+                'finding': snippet[:300] if snippet else f'Review of {product_name} from {source_name}'
+            })
+    except Exception:
+        pass
+    return results
+
+
+def _search_youtube_reviews(product_name: str, timeout: int = 10) -> list[dict]:
+    """Search DuckDuckGo for real YouTube review videos and return structured results with actual video links."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus, urlparse, parse_qs
+    results = []
+    try:
+        query = f"{product_name} review site:youtube.com"
+        ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
+        r = httpx.post(ddg_url, headers=headers, data={'q': query}, timeout=timeout)
+        if r.status_code != 200:
+            return results
+        soup = BeautifulSoup(r.text, 'html.parser')
+
+        for res_el in soup.select('.result'):
+            if len(results) >= 6:
+                break
+            title_el = res_el.select_one('.result__title a')
+            snippet_el = res_el.select_one('.result__snippet')
+            if not title_el:
+                continue
+
+            title = title_el.get_text().strip()
+            snippet = snippet_el.get_text().strip() if snippet_el else ''
+            href = title_el.get('href', '')
+
+            # Extract actual URL from DuckDuckGo redirect
+            actual_url = href
+            if 'uddg=' in href:
+                parsed = urlparse(href)
+                qs = parse_qs(parsed.query)
+                actual_url = qs.get('uddg', [href])[0]
+
+            if not actual_url or 'youtube.com' not in actual_url.lower():
+                continue
+
+            # Skip ads
+            if any(k in title.lower() for k in ['order online', 'ad clicks']):
+                continue
+
+            # Extract channel name from title patterns like "Title - ChannelName" or "Title | ChannelName"
+            channel = 'YouTube Creator'
+            for sep in [' - ', ' | ', ' by ']:
+                if sep in title:
+                    parts = title.rsplit(sep, 1)
+                    if len(parts) == 2 and len(parts[1].strip()) > 2:
+                        channel = parts[1].strip()
+                        title = parts[0].strip()
+                    break
+
+            # Detect sentiment from snippet
+            s_low = snippet.lower()
+            pos = sum(1 for k in ['excellent', 'great', 'best', 'amazing', 'love', 'worth', 'recommend', 'impressive'] if k in s_low)
+            neg = sum(1 for k in ['disappointed', 'bad', 'issue', 'problem', 'avoid', 'overpriced', 'skip'] if k in s_low)
+            sentiment = 'Positive' if pos > neg else 'Mixed' if neg > pos else 'Balanced'
+
+            results.append({
+                'channel': channel,
+                'title': title,
+                'url': actual_url,
+                'sentiment': sentiment,
+                'findings': snippet[:250] if snippet else f'Video review of {product_name}'
+            })
+    except Exception:
+        pass
+    return results
+
+
+def _extract_pros_cons(snippets: list[str], product_name: str) -> dict:
+    """Extract pros and cons from review snippets using keyword pattern matching."""
+    pros = []
+    cons = []
+
+    # Positive keyword patterns
+    pro_patterns = [
+        (r'(?:excellent|outstanding|exceptional|superb|impressive)\s+(.{10,80})', 'Performance'),
+        (r'(?:great|good|solid|reliable)\s+(battery|build|display|camera|sound|screen|design|performance|quality)(?:\s+.{5,60})?', 'Quality'),
+        (r'(?:best|top|class-leading|flagship)\s+(.{8,80})', 'Category Leader'),
+        (r'(?:love|loved|favorite|favourite)\s+(?:the\s+)?(.{5,60})', 'User Favorite'),
+        (r'(?:smooth|fast|snappy|responsive)\s+(.{5,60})', 'Performance'),
+        (r'(?:comfortable|ergonomic|lightweight|premium)\s+(.{5,60})', 'Build & Design'),
+        (r'(?:long|all-day|excellent)\s+(?:battery|lasting)(?:\s+.{5,60})?', 'Battery Life'),
+    ]
+
+    # Negative keyword patterns
+    con_patterns = [
+        (r'(?:poor|weak|bad|terrible|awful)\s+(.{10,80})', 'Weakness'),
+        (r'(?:no|lack|lacks|missing|without)\s+(.{5,60})', 'Missing Feature'),
+        (r'(?:expensive|overpriced|costly|pricey)(?:\s+.{5,60})?', 'Price'),
+        (r'(?:heavy|bulky|thick|large|huge)(?:\s+.{5,60})?', 'Form Factor'),
+        (r'(?:slow|sluggish|laggy|stuttery)(?:\s+.{5,60})?', 'Performance Issue'),
+        (r'(?:heats?|overheats?|hot|thermal)(?:\s+.{5,60})?', 'Heating'),
+        (r'(?:disappointing|mediocre|average)\s+(.{5,60})', 'Letdown'),
+    ]
+
+    seen_pros = set()
+    seen_cons = set()
+
+    for snippet in snippets:
+        s_low = snippet.lower()
+        source_match = re.search(r'^(.+?)(?:\s*[-–|]\s*|\s*:\s*)', snippet)
+        source = source_match.group(1)[:30] if source_match else 'Review Source'
+
+        for pattern, category in pro_patterns:
+            matches = re.findall(pattern, s_low)
+            for m in matches:
+                point = m.strip().rstrip('.') if isinstance(m, str) else m
+                if len(point) > 5 and point not in seen_pros:
+                    seen_pros.add(point)
+                    # Capitalize first letter
+                    pros.append({'point': point[0].upper() + point[1:], 'source': source, 'category': category})
+
+        for pattern, category in con_patterns:
+            matches = re.findall(pattern, s_low)
+            for m in matches:
+                point = m.strip().rstrip('.') if isinstance(m, str) else category
+                if len(point) > 3 and point not in seen_cons:
+                    seen_cons.add(point)
+                    cons.append({'point': point[0].upper() + point[1:], 'source': source, 'category': category})
+
+    return {'pros': pros[:8], 'cons': cons[:8]}
+
+
+def _ai_chat_completion(prompt: str, pref=None) -> str:
+    """Send a free-form prompt to whichever AI provider is configured and return the response text.
+    Works with: builtin (returns ''), Ollama, OpenAI-compatible, and per-user custom AI."""
+    import json as _json
+
+    # 1. Per-user custom AI
+    if pref and getattr(pref, 'custom_ai_enabled', False) and getattr(pref, 'custom_ai_api_key', ''):
+        try:
+            base = (getattr(pref, 'custom_ai_base_url', 'https://api.openai.com/v1') or 'https://api.openai.com/v1').rstrip('/')
+            r = httpx.post(
+                f"{base}/chat/completions",
+                headers={'Authorization': f"Bearer {getattr(pref, 'custom_ai_api_key', '')}", 'Content-Type': 'application/json'},
+                json={'model': getattr(pref, 'custom_ai_model', 'gpt-4o-mini'), 'temperature': 0.3, 'max_tokens': 800,
+                      'messages': [{'role': 'user', 'content': prompt}]},
+                timeout=settings.ai_timeout
+            )
+            if r.is_success:
+                return r.json()['choices'][0]['message']['content'].strip()
+        except Exception:
+            pass
+
+    # 2. Server-configured OpenAI-compatible API
+    provider = (settings.ai_provider or 'builtin').strip().lower()
+    if provider in {'api', 'openai', 'openai-compatible'} and settings.ai_api_key:
+        try:
+            base = settings.ai_api_base_url.rstrip('/')
+            r = httpx.post(
+                f"{base}/chat/completions",
+                headers={'Authorization': f"Bearer {settings.ai_api_key}", 'Content-Type': 'application/json'},
+                json={'model': settings.ai_api_model, 'temperature': 0.3, 'max_tokens': 800,
+                      'messages': [{'role': 'user', 'content': prompt}]},
+                timeout=settings.ai_timeout
+            )
+            if r.is_success:
+                return r.json()['choices'][0]['message']['content'].strip()
+        except Exception:
+            pass
+
+    # 3. Ollama local
+    if provider in {'ollama', 'local', 'local-ollama'}:
+        try:
+            r = httpx.post(
+                settings.ollama_base_url.rstrip('/') + '/api/generate',
+                json={'model': settings.ollama_model, 'prompt': prompt, 'stream': False},
+                timeout=settings.ai_timeout
+            )
+            if r.is_success:
+                return r.json().get('response', '').strip()
+        except Exception:
+            pass
+
+    # 4. Builtin — no LLM available, return empty
+    return ''
+
+
+def _ai_summarize_reviews(product_name: str, snippets: list[str], pros_cons: dict, pref=None) -> str:
+    """Use any configured AI provider to generate a review summary with pros, cons, and recommendation."""
+    if not snippets:
+        return ''
+
+    combined = '\n'.join(f'- {s[:200]}' for s in snippets[:10])
+    pro_text = ', '.join(p['point'] for p in pros_cons.get('pros', [])[:5])
+    con_text = ', '.join(c['point'] for c in pros_cons.get('cons', [])[:5])
+
+    prompt = (
+        f"You are a shopping advisor. Based on these real review excerpts for \"{product_name}\", "
+        f"provide a concise 2-3 sentence overall assessment and buying recommendation.\n\n"
+        f"Review excerpts:\n{combined}\n\n"
+        f"Known pros: {pro_text or 'Not yet identified'}\n"
+        f"Known cons: {con_text or 'Not yet identified'}\n\n"
+        f"Respond with ONLY a plain text summary (no JSON, no markdown headers). "
+        f"Include: overall sentiment, key strength, key weakness, and whether it's worth buying."
+    )
+
+    return _ai_chat_completion(prompt, pref=pref)
+
+
+def get_review_intelligence(product_name: str, category: str = '', pref=None) -> dict:
+    """Fetches LIVE review intelligence from the web: real review articles, real YouTube videos,
+    extracted pros & cons, and an AI-powered summary. No hardcoded dummy data."""
+    timeout = settings.review_search_timeout
+
+    # 1. Fetch real web reviews
+    articles = _search_web_reviews(product_name, timeout=timeout)
+
+    # 2. Fetch real YouTube video reviews
+    youtube = _search_youtube_reviews(product_name, timeout=timeout)
+
+    # 3. Collect all snippets for analysis
+    all_snippets = [a['finding'] for a in articles if a.get('finding')]
+    all_snippets += [y['findings'] for y in youtube if y.get('findings')]
+
+    # 4. Extract pros and cons from snippets
+    pros_cons = _extract_pros_cons(all_snippets, product_name)
+
+    # 5. AI-powered summary (works with any configured AI provider)
+    ai_suggestion = _ai_summarize_reviews(product_name, all_snippets, pros_cons, pref=pref)
+
+    # 6. Calculate overall sentiment from review signals
+    total_reviews = len(articles) + len(youtube)
+    positive_count = sum(1 for a in articles if 'positive' in (a.get('sentiment', '')).lower())
+    positive_count += sum(1 for y in youtube if 'positive' in (y.get('sentiment', '')).lower())
+
+    if total_reviews == 0:
+        overall = f'NO REVIEWS FOUND — Try a more specific product name'
+        summary = f'No live reviews could be found for "{product_name}". Try adding the brand name or model number for better results.'
+    elif positive_count / max(total_reviews, 1) >= 0.6:
+        overall = f'POSITIVE ({positive_count}/{total_reviews} favorable across {len(articles)} articles + {len(youtube)} videos)'
+        summary = f'Majority of reviewers rate {product_name} positively. {len(articles)} expert reviews and {len(youtube)} YouTube videos analyzed from live sources.'
+    elif positive_count / max(total_reviews, 1) >= 0.3:
+        overall = f'MIXED ({positive_count}/{total_reviews} favorable, some concerns noted)'
+        summary = f'Reviews for {product_name} are mixed. Some reviewers praise it while others note issues. Check the pros and cons below.'
     else:
-        sources = [
-            {'source': 'Verified Buyer Aggregate', 'type': 'E-Commerce Feedback', 'url': 'https://www.amazon.in', 'sentiment': 'Positive (4.6/5)', 'finding': 'Consistently high buyer satisfaction and accurate product specifications.'}
-        ]
-        youtube = [
-            {'channel': 'Verified Product Lab', 'title': f'Hands-On Inspection: {product_name.title()}', 'url': f'https://www.youtube.com/results?search_query={urllib.parse.quote(product_name + " review")}', 'sentiment': 'Positive', 'findings': 'High quality matching listed parameters and reliable performance.'}
-        ]
+        overall = f'CRITICAL ({total_reviews - positive_count}/{total_reviews} reviews flag concerns)'
+        summary = f'Several reviewers raise concerns about {product_name}. Review the cons carefully before purchasing.'
 
     return {
-        'overall_sentiment': 'POSITIVE (88% Favorable)',
-        'summary': 'Users consistently praise build quality and reliability; verified reviews show low return rates.',
-        'articles': sources,
-        'youtube_reviews': youtube
+        'overall_sentiment': overall,
+        'summary': summary,
+        'articles': articles,
+        'youtube_reviews': youtube,
+        'pros': pros_cons.get('pros', []),
+        'cons': pros_cons.get('cons', []),
+        'ai_suggestion': ai_suggestion,
+        'sources_searched': total_reviews,
     }
 
 def basket(items, mode='CHEAPEST'):

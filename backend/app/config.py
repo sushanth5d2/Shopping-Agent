@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     serper_api_key: str = ''
     google_api_key: str = ''
     google_cx: str = ''
+    youtube_api_key: str = ''
+    review_search_timeout: int = 10
     url_fetch_timeout: int = 30000
     max_comparison_sources: int = 8
     allow_demo_seed: bool = True
