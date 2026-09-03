@@ -5,7 +5,8 @@ ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    python -m playwright install --with-deps chromium
 
 COPY . .
 EXPOSE 8000

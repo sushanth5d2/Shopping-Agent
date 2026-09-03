@@ -54,6 +54,7 @@ services:
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
     ports:
       - "${SHOPAGENT_API_PORT:-8000}:8000"
+    shm_size: '1gb'
     networks:
       - shopagent_net
     depends_on:
@@ -77,6 +78,7 @@ services:
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
       SHOPAGENT_PLAYWRIGHT_HEADLESS: ${SHOPAGENT_PLAYWRIGHT_HEADLESS:-true}
+    shm_size: '1gb'
     networks:
       - shopagent_net
     depends_on:
