@@ -429,6 +429,10 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
    db.add(it); db.flush()
    if it.mode == 'MONITOR':
     db.add(MonitoringTask(item_id=it.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc) + timedelta(minutes=360)))
+   if getattr(obs, 'real_reviews', None):
+    log(db, u, 'BROWSER_AGENT', f"Autonomous Browser Agent extracted {len(obs.real_reviews)} verified customer reviews from {obs.seller or 'online retailer'}.")
+   if obs.observed_live:
+    log(db, u, 'BROWSER_AGENT', f"Playwright Stealth browser live-verified product '{item_display_name}' at Rs. {item_price:,.2f}.")
    log(db, u, 'Products', f"Added URL product {item_display_name} with verified multi-store tracking.")
    db.commit(); db.refresh(it)
    return item_obj(db, it)
@@ -959,6 +963,15 @@ def orders(u=Depends(current_user),db:Session=Depends(get_db)):
   'is_gift':getattr(o, 'is_gift', False),
   'gift_recipient':getattr(o, 'gift_recipient', '')
  } for o in db.query(Order).filter_by(user_id=u.id).order_by(Order.created_at.desc())]
+@app.get('/api/agent/live-steps')
+def agent_live_steps():
+    from .browser_agent import agent_task_progress
+    all_steps = []
+    for tid, steps in agent_task_progress.items():
+        all_steps.extend(steps)
+    all_steps.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+    return {'steps': all_steps[:15]}
+
 @app.get('/api/activity')
 def activity(u=Depends(current_user),db:Session=Depends(get_db)):
  return [{'id':x.id,'kind':x.kind,'message':x.message,'created_at':x.created_at} for x in db.query(AgentEvent).filter_by(user_id=u.id).order_by(AgentEvent.created_at.desc()).limit(200)]

@@ -35,6 +35,9 @@ class ProductObservation:
     checkout_supported: bool = False
     requires_user_action: bool = True
     observed_live: bool = False
+    bullets: list = None
+    real_reviews: list = None
+    image_url: str = ''
 
 class StoreConnector:
     name = 'abstract'
@@ -99,6 +102,29 @@ class JsonLdWebConnector(StoreConnector):
 
     def observe_url(self, url: str) -> ProductObservation:
         validate_public_url(url)
+
+        # 1. First attempt deep live extraction using Autonomous BrowserAgent
+        try:
+            from .browser_agent import BrowserAgent
+            b_agent = BrowserAgent()
+            b_res = b_agent.run(url)
+            if b_res.title and b_res.price > 0:
+                host = (urlparse(url).hostname or '').lower().replace('www.', '')
+                seller_n = 'Amazon India' if 'amazon' in host else ('Flipkart' if 'flipkart' in host else host.capitalize())
+                return ProductObservation(
+                    name=b_res.title,
+                    price=b_res.price,
+                    brand=b_res.brand,
+                    url=url,
+                    seller=seller_n,
+                    observed_live=True,
+                    bullets=b_res.bullets or [],
+                    real_reviews=b_res.reviews or [],
+                    image_url=b_res.image_url
+                )
+        except Exception:
+            pass
+
         html = ''
         final_url = url
         title = ''
