@@ -324,9 +324,15 @@ export default function App() {
 
   const run = async () => {
     if (!input.trim()) return;
+    const text = input.trim();
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+      setProductUrl(text);
+      setInput('');
+      await analyzeUrl(false);
+      return;
+    }
     setBusy(true);
     try {
-      const text = input.trim();
       await req('/api/intent', {
         method: 'POST',
         body: JSON.stringify({ text })

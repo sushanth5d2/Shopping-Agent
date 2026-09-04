@@ -276,11 +276,25 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
  category = classify_product_category(clean)
  est_price = estimate_item_market_price(clean, category, default_price)
 
+ if clean.startswith(('http://', 'https://')):
+  clean = parse_name_from_url(clean)
+
+ # Extract clean, concise brand name (never a URL or long string)
+ clean_brand = 'Samsung' if 'samsung' in clean.lower() else (
+     'Apple' if 'apple' in clean.lower() or 'iphone' in clean.lower() else (
+         'OnePlus' if 'oneplus' in clean.lower() else (
+             'Sony' if 'sony' in clean.lower() else (
+                 clean.split()[0].capitalize()[:40] if clean and not clean.startswith('http') else 'Genuine Brand'
+             )
+         )
+     )
+ )
+
  prod = Product(
-  name=clean[:500],
-  brand=clean.split()[0].capitalize()[:255] if clean else 'Genuine Brand',
-  model=clean[:255],
-  category=category[:100],
+  name=clean[:400],
+  brand=clean_brand[:80],
+  model=clean[:100],
+  category=category[:80],
   specs=f"Category: {category}"
  )
  db.add(prod)
@@ -576,8 +590,34 @@ def test_ai(p:TestAiIn,u=Depends(current_user)):
 def intent(p:Intent,u=Depends(current_user),db:Session=Depends(get_db)):
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
  pincode = getattr(pref, 'delivery_pincode', '') if pref else ''
- parsed=get_ai_provider(pref=pref).parse(p.text)
  sl=user_list(db,u)
+
+ raw_text = p.text.strip()
+ if raw_text.startswith(('http://', 'https://')):
+  try:
+   validate_public_url(raw_text)
+   obs = connector_for(raw_text).observe_url(raw_text)
+   prod_name = obs.name or parse_name_from_url(raw_text)
+   matched_prod = find_or_create_product_for_name(db, prod_name, obs.price, pincode=pincode)
+   it = ShoppingItem(
+    list_id=sl.id,
+    name=prod_name[:400],
+    quantity=1,
+    target_price=obs.price,
+    max_price=obs.price,
+    mode='BUY_NOW',
+    purchase_mode='ASK',
+    product_id=matched_prod.id
+   )
+   db.add(it)
+   db.flush()
+   db.commit()
+   db.refresh(it)
+   return {'parsed': {'name': prod_name, 'target_price': obs.price, 'mode': 'BUY_NOW'}, 'items': [item_obj(db, it)]}
+  except Exception:
+   pass
+
+ parsed=get_ai_provider(pref=pref).parse(p.text)
  chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]
  parsed_list=[deterministic_parse(x) for x in chunks] if len(chunks)>1 and not any(k in p.text.lower() for k in ['below','under','monitor']) else [parsed]
  made=[]

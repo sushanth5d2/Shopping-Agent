@@ -103,6 +103,16 @@ def auto_migrate_schema(eng):
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_recipient VARCHAR(120) DEFAULT '';",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_message TEXT DEFAULT '';",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_wrap BOOLEAN DEFAULT FALSE;",
+        # Auto-widen product, order, and item text columns for long e-commerce URLs & specs
+        "ALTER TABLE products ALTER COLUMN name TYPE TEXT;",
+        "ALTER TABLE products ALTER COLUMN brand TYPE VARCHAR(255);",
+        "ALTER TABLE products ALTER COLUMN model TYPE VARCHAR(500);",
+        "ALTER TABLE products ALTER COLUMN variant TYPE VARCHAR(255);",
+        "ALTER TABLE products ALTER COLUMN category TYPE VARCHAR(255);",
+        "ALTER TABLE products ALTER COLUMN specs TYPE TEXT;",
+        "ALTER TABLE shopping_items ALTER COLUMN name TYPE TEXT;",
+        "ALTER TABLE orders ALTER COLUMN product_name TYPE TEXT;",
+        "ALTER TABLE store_listings ALTER COLUMN url TYPE TEXT;",
         # shopping_items columns
         "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS product_id INTEGER;",
         "ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;",
