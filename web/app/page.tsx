@@ -271,13 +271,14 @@ export default function App() {
     }
   };
 
-  const analyzeUrl = async (monitor = false) => {
-    if (!productUrl.trim()) return;
+  const analyzeUrl = async (monitor = false, urlOverride?: string) => {
+    const targetUrl = (urlOverride || productUrl).trim();
+    if (!targetUrl) return;
     setUrlBusy(true);
     try {
       const x = await req('/api/products/url-analyze', {
         method: 'POST',
-        body: JSON.stringify({ url: productUrl.trim(), monitor })
+        body: JSON.stringify({ url: targetUrl, monitor })
       });
       setCompare(x.comparison);
       setTab('Compare');
@@ -328,7 +329,7 @@ export default function App() {
     if (text.startsWith('http://') || text.startsWith('https://')) {
       setProductUrl(text);
       setInput('');
-      await analyzeUrl(false);
+      await analyzeUrl(false, text);
       return;
     }
     setBusy(true);

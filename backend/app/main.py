@@ -279,16 +279,20 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
  if clean.startswith(('http://', 'https://')):
   clean = parse_name_from_url(clean)
 
- # Extract clean, concise brand name (never a URL or long string)
- clean_brand = 'Samsung' if 'samsung' in clean.lower() else (
-     'Apple' if 'apple' in clean.lower() or 'iphone' in clean.lower() else (
-         'OnePlus' if 'oneplus' in clean.lower() else (
-             'Sony' if 'sony' in clean.lower() else (
-                 clean.split()[0].capitalize()[:40] if clean and not clean.startswith('http') else 'Genuine Brand'
-             )
-         )
-     )
- )
+ # Extract clean, concise brand name using comprehensive brand map
+ _brands = {
+  'samsung': 'Samsung', 'apple': 'Apple', 'iphone': 'Apple', 'ipad': 'Apple', 'macbook': 'Apple',
+  'oneplus': 'OnePlus', 'sony': 'Sony', 'xiaomi': 'Xiaomi', 'redmi': 'Xiaomi', 'poco': 'POCO',
+  'realme': 'Realme', 'vivo': 'Vivo', 'oppo': 'OPPO', 'motorola': 'Motorola', 'moto ': 'Motorola',
+  'nothing': 'Nothing', 'google': 'Google', 'pixel': 'Google', 'nokia': 'Nokia', 'asus': 'ASUS',
+  'lenovo': 'Lenovo', 'hp ': 'HP', 'dell': 'Dell', 'acer': 'Acer', 'lg ': 'LG',
+  'bosch': 'Bosch', 'boat': 'boAt', 'jbl': 'JBL', 'bose': 'Bose', 'dyson': 'Dyson',
+  'philips': 'Philips', 'nike': 'Nike', 'adidas': 'Adidas', 'puma': 'Puma',
+ }
+ clean_lower = clean.lower()
+ clean_brand = next((v for k, v in _brands.items() if k in clean_lower), None)
+ if not clean_brand:
+  clean_brand = clean.split()[0].capitalize()[:40] if clean and not clean.startswith('http') else 'Genuine Brand'
 
  prod = Product(
   name=clean[:400],
@@ -615,8 +619,9 @@ def intent(p:Intent,u=Depends(current_user),db:Session=Depends(get_db)):
    db.commit()
    db.refresh(it)
    return {'parsed': {'name': prod_name, 'target_price': obs.price, 'mode': 'BUY_NOW'}, 'items': [item_obj(db, it)]}
-  except Exception:
-   pass
+  except Exception as exc:
+   import logging
+   logging.getLogger('uvicorn').warning(f"Intent URL analysis failed for {raw_text[:100]}: {exc}")
 
  parsed=get_ai_provider(pref=pref).parse(p.text)
  chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]

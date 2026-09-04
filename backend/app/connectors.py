@@ -272,9 +272,11 @@ class JsonLdWebConnector(StoreConnector):
                 price = price_match.group(1)
 
         final_price = normalize_price(price) if price else 0.0
+        price_is_estimated = False
         if final_price <= 0:
             final_price = estimate_item_market_price(name or url_slug_name, 'ELECTRONICS')
-        observed_live = True if final_price > 0 else False
+            price_is_estimated = True
+        observed_live = True if (final_price > 0 and not price_is_estimated) else False
 
         # Live fallback for price if not extracted directly from page
         if final_price <= 0 and name != 'Product Online':

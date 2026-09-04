@@ -10,10 +10,19 @@ from .config import settings
 # Global live progress tracker keyed by item_id or task_id
 agent_task_progress: dict[str, list[dict]] = {}
 
+def _cleanup_stale_tasks():
+    """Remove task entries older than 30 minutes to prevent memory leak."""
+    cutoff = time.time() - 1800
+    stale_keys = [k for k, steps in agent_task_progress.items()
+                  if steps and steps[-1].get('timestamp', 0) < cutoff]
+    for k in stale_keys:
+        del agent_task_progress[k]
+
 def record_agent_step(task_id: str, step: str, message: str, data: dict = None):
     """Records an atomic progress step for the UI live stream."""
     if not task_id:
         return
+    _cleanup_stale_tasks()
     if task_id not in agent_task_progress:
         agent_task_progress[task_id] = []
     agent_task_progress[task_id].append({
@@ -22,7 +31,7 @@ def record_agent_step(task_id: str, step: str, message: str, data: dict = None):
         'data': data or {},
         'timestamp': time.time()
     })
-    # Keep last 25 steps
+    # Keep last 25 steps per task
     agent_task_progress[task_id] = agent_task_progress[task_id][-25:]
 
 @dataclass
@@ -156,7 +165,29 @@ class BrowserAgent:
                         pass
 
             result.price = price_val
-            result.brand = 'Samsung' if 'samsung' in title.lower() else ('Apple' if 'apple' in title.lower() or 'iphone' in title.lower() else 'Genuine Brand')
+
+            # Extract brand from title using comprehensive brand list
+            _brand_map = {
+                'samsung': 'Samsung', 'apple': 'Apple', 'iphone': 'Apple', 'ipad': 'Apple', 'macbook': 'Apple',
+                'oneplus': 'OnePlus', 'one plus': 'OnePlus', 'sony': 'Sony', 'xiaomi': 'Xiaomi', 'redmi': 'Xiaomi',
+                'poco': 'POCO', 'realme': 'Realme', 'vivo': 'Vivo', 'oppo': 'OPPO', 'motorola': 'Motorola',
+                'moto ': 'Motorola', 'nothing': 'Nothing', 'google': 'Google', 'pixel': 'Google',
+                'nokia': 'Nokia', 'asus': 'ASUS', 'lenovo': 'Lenovo', 'hp ': 'HP', 'dell': 'Dell',
+                'acer': 'Acer', 'msi': 'MSI', 'lg ': 'LG', 'bosch': 'Bosch', 'whirlpool': 'Whirlpool',
+                'haier': 'Haier', 'voltas': 'Voltas', 'godrej': 'Godrej', 'boat': 'boAt', 'jbl': 'JBL',
+                'bose': 'Bose', 'sennheiser': 'Sennheiser', 'marshall': 'Marshall', 'fire-boltt': 'Fire-Boltt',
+                'noise': 'Noise', 'amazfit': 'Amazfit', 'garmin': 'Garmin', 'fitbit': 'Fitbit',
+                'canon': 'Canon', 'nikon': 'Nikon', 'gopro': 'GoPro', 'dyson': 'Dyson',
+                'philips': 'Philips', 'bajaj': 'Bajaj', 'crompton': 'Crompton', 'havells': 'Havells',
+                'prestige': 'Prestige', 'nike': 'Nike', 'adidas': 'Adidas', 'puma': 'Puma',
+            }
+            title_lower = title.lower()
+            detected_brand = ''
+            for key, brand_name in _brand_map.items():
+                if key in title_lower:
+                    detected_brand = brand_name
+                    break
+            result.brand = detected_brand or (title.split()[0].capitalize()[:40] if title else 'Genuine Brand')
 
             # Extract Feature Bullets
             bullets = []
@@ -210,17 +241,16 @@ class BrowserAgent:
                 r_body = body_el.get_text(strip=True) if body_el else ''
                 date_str = date_el.get_text(strip=True) if date_el else 'Recent'
 
-                review_text = r_body or (
-                    f"Verified {rating:.0f}-star purchaser rating. Buyer verified authentic hardware specifications and satisfaction."
-                )
+                has_real_body = bool(r_body and len(r_body) > 5)
+                review_text = r_body if has_real_body else f"{rating:.0f}-star rating by {author}."
 
                 real_reviews.append({
                     'store': 'Amazon India',
                     'buyer_name': author,
-                    'verified': True,
-                    'badge': 'Verified Amazon Purchaser',
+                    'verified': has_real_body,
+                    'badge': 'Verified Amazon Purchaser' if has_real_body else 'Rating Only',
                     'rating': rating,
-                    'title': r_title or 'Verified Buyer Rating',
+                    'title': r_title or 'Buyer Rating',
                     'review': review_text,
                     'date': date_str
                 })
@@ -238,7 +268,7 @@ class BrowserAgent:
             competitors_to_check = [
                 ('Vijay Sales', 'vijaysales.com', f'https://www.vijaysales.com/search/{urllib.parse.quote_plus(clean_search)}', 'span.sp-price'),
                 ('Flipkart', 'flipkart.com', f'https://www.flipkart.com/search?q={urllib.parse.quote_plus(clean_search)}', 'div.Nx9bqj'),
-                ('Croma', 'croma.com', f'https://www.croma.com/searchB?q={urllib.parse.quote_plus(clean_search)}', 'span.amount'),
+                ('Croma', 'croma.com', f'https://www.croma.com/search?q={urllib.parse.quote_plus(clean_search)}', 'span.amount'),
             ]
             for store_name, domain, search_url, price_selector in competitors_to_check:
                 try:
