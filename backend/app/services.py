@@ -199,19 +199,40 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
         if 'butter' in nl: return 58.0
         return 60.0
 
-    if 'iphone 16 pro max' in nl: return 144900.0
-    if 'iphone 16 pro' in nl: return 119900.0
-    if 'iphone 16 plus' in nl: return 77900.0
-    if 'iphone 16' in nl: return 67900.0
-    if 'iphone 15' in nl: return 54900.0
+    # Flagship smartphones
+    if 's26 ultra' in nl: return 139999.0
+    if 's26 plus' in nl or 's26+' in nl: return 108499.0
+    if 's26' in nl: return 79999.0
+    if 's25 ultra' in nl: return 129999.0
+    if 's25 plus' in nl or 's25+' in nl: return 99999.0
+    if 's25' in nl: return 74999.0
     if 's24 ultra' in nl: return 121999.0
     if 's24 plus' in nl or 's24+' in nl: return 84999.0
     if 's24' in nl: return 64999.0
+    if 's23' in nl: return 49999.0
+    if 'iphone 16 pro max' in nl: return 144900.0
+    if 'iphone 16 pro' in nl: return 119900.0
+    if 'iphone 16 plus' in nl: return 77900.0
+    if 'iphone 16e' in nl or 'iphone 16 e' in nl: return 59900.0
+    if 'iphone 16' in nl: return 67900.0
+    if 'iphone 15 pro' in nl: return 99900.0
+    if 'iphone 15' in nl: return 54900.0
+    if 'oneplus 13' in nl: return 69999.0
     if 'oneplus 12' in nl: return 59999.0
     if 'pixel 9 pro' in nl: return 109999.0
     if 'pixel 9' in nl: return 69999.0
 
-    if category == 'ELECTRONICS': return 5000.0
+    # Electronics spec-aware estimation (phones with 12GB RAM, 512GB storage, snapdragon, 200mp, etc.)
+    if category == 'ELECTRONICS':
+        is_high_spec = any(k in nl for k in ['512gb', '1tb', 'snapdragon 8', '200mp', 'ultra 5g', 'pro max'])
+        is_mid_spec = any(k in nl for k in ['256gb', '128gb', '12gb ram', '8gb ram', 'amoled', 'snapdragon', '5g'])
+        if is_high_spec: return 108499.0
+        if is_mid_spec: return 45000.0
+        if any(k in nl for k in ['laptop', 'macbook', 'notebook', 'thinkpad']): return 65000.0
+        if any(k in nl for k in ['tv', 'television', 'oled', 'qled']): return 45000.0
+        if any(k in nl for k in ['watch', 'smartwatch']): return 15000.0
+        if any(k in nl for k in ['earbuds', 'headphone', 'airpods']): return 8000.0
+        return 5000.0
     if category == 'HEALTH': return 300.0
     if category == 'FASHION': return 800.0
     return 1000.0

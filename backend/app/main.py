@@ -256,8 +256,64 @@ def dashboard(u=Depends(current_user),db:Session=Depends(get_db)):
 @app.get('/api/items')
 def items(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);return {'items':[item_obj(db,x) for x in db.query(ShoppingItem).filter_by(list_id=sl.id).order_by(ShoppingItem.created_at.desc()).all()]}
+def sync_product_store_prices(db, prod: Product, base_price: float, category: str, query: str, pincode: str = ''):
+ """Synchronizes/calibrates all store listings for a product with the latest verified base price."""
+ if not base_price or base_price <= 0:
+  return
+ stores_data = search_live_stores(category, query, base_price, pincode)
+ for s_info in stores_data:
+  store_name = s_info['name']
+  base_url = s_info['base_url']
+  st = db.query(Store).filter((Store.base_url == base_url) | (Store.name == store_name)).first()
+  if not st:
+   st = Store(name=store_name[:255], base_url=base_url[:500], price_supported=True, search_supported=True, stock_supported=True, checkout_supported=False)
+   db.add(st)
+   db.flush()
+  seller_name = s_info.get('seller', f"{store_name} Verified Retail")
+  seller = db.query(Seller).filter_by(store_id=st.id, name=seller_name).first()
+  if not seller:
+   seller = Seller(store_id=st.id, name=seller_name[:255], rating=s_info.get('rating', 4.7))
+   db.add(seller)
+   db.flush()
+  listing = db.query(StoreListing).filter_by(product_id=prod.id, store_id=st.id).first()
+  price = s_info['price']
+  deliv = s_info.get('delivery', 0.0)
+  if listing:
+   listing.price = price
+   listing.delivery = deliv
+   listing.url = s_info['url'][:2000]
+   listing.observed_at = datetime.now(timezone.utc)
+  else:
+   listing = StoreListing(
+    product_id=prod.id,
+    store_id=st.id,
+    seller_id=seller.id,
+    url=s_info['url'][:2000],
+    currency='INR',
+    price=price,
+    delivery=deliv,
+    stock=1,
+    warranty=s_info.get('badge', '100% Genuine Verified')[:160],
+    returns=s_info.get('return_policy', '7-day return policy')[:160]
+   )
+   db.add(listing)
+   db.flush()
+  total = round(price + deliv, 2)
+  db.add(PriceSnapshot(
+   listing_id=listing.id,
+   price=price,
+   delivery=deliv,
+   total=total,
+   stock=1,
+   seller=seller_name[:160]
+  ))
+ db.commit()
+
 def find_or_create_product_for_name(db, name: str, default_price: float | None = None, pincode: str = '') -> Product:
  clean = name.strip()
+ if clean.startswith(('http://', 'https://')):
+  clean = parse_name_from_url(clean)
+
  words = set(re.findall(r'[a-z0-9]+', clean.lower()))
  all_prods = db.query(Product).all()
  best_match = None
@@ -266,18 +322,21 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
   p_words = set(re.findall(r'[a-z0-9]+', p.name.lower()))
   if p_words and words:
    score = len(words & p_words) / len(words | p_words)
-   if score > best_score and score >= 0.35:
+   if score > best_score and score >= 0.65:
     best_score = score
     best_match = p
 
  if best_match:
+  # Check if best_match has obsolete/fallback prices while default_price is a genuine verified price
+  if default_price and default_price > 0:
+   cur_listings = db.query(StoreListing).filter_by(product_id=best_match.id).all()
+   cur_prices = [l.price for l in cur_listings if l.price > 0]
+   if not cur_prices or any(abs(cp - default_price) / max(cp, default_price) > 0.35 for cp in cur_prices):
+    sync_product_store_prices(db, best_match, default_price, best_match.category or 'ELECTRONICS', best_match.name, pincode)
   return best_match
 
  category = classify_product_category(clean)
- est_price = estimate_item_market_price(clean, category, default_price)
-
- if clean.startswith(('http://', 'https://')):
-  clean = parse_name_from_url(clean)
+ est_price = default_price if (default_price and default_price > 0) else estimate_item_market_price(clean, category)
 
  # Extract clean, concise brand name using comprehensive brand map
  _brands = {
@@ -304,50 +363,7 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
  db.add(prod)
  db.flush()
 
- stores_data = search_live_stores(category, clean, est_price, pincode)
- for s_info in stores_data:
-  store_name = s_info['name']
-  base_url = s_info['base_url']
-  st = db.query(Store).filter((Store.base_url == base_url) | (Store.name == store_name)).first()
-  if not st:
-   st = Store(name=store_name[:255], base_url=base_url[:500], price_supported=True, search_supported=True, stock_supported=True, checkout_supported=False)
-   db.add(st)
-   db.flush()
-  seller_name = s_info.get('seller', f"{store_name} Verified Retail")
-  seller = db.query(Seller).filter_by(store_id=st.id, name=seller_name).first()
-  if not seller:
-   seller = Seller(store_id=st.id, name=seller_name[:255], rating=s_info.get('rating', 4.7))
-   db.add(seller)
-   db.flush()
-  
-  price = s_info['price']
-  deliv = s_info.get('delivery', 0.0)
-  listing = StoreListing(
-   product_id=prod.id,
-   store_id=st.id,
-   seller_id=seller.id,
-   url=s_info['url'][:2000],
-   currency='INR',
-   price=price,
-   delivery=deliv,
-   stock=1,
-   warranty=s_info.get('badge', '100% Genuine Verified')[:160],
-   returns=s_info.get('return_policy', '7-day return policy')[:160]
-  )
-  db.add(listing)
-  db.flush()
-  
-  # Create current & historical price snapshots for Decision Lab
-  total = round(price + deliv, 2)
-  db.add(PriceSnapshot(
-   listing_id=listing.id,
-   price=price,
-   delivery=deliv,
-   total=total,
-   stock=1,
-   seller=seller_name[:160]
-  ))
- db.commit()
+ sync_product_store_prices(db, prod, est_price, category, clean, pincode)
  return prod
 
 @app.post('/api/items')
@@ -429,6 +445,9 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
      stock=existing_listing.stock,
      seller=seller.name[:160]
     ))
+
+   if obs.price > 0:
+    sync_product_store_prices(db, matched_prod, obs.price, matched_prod.category or 'ELECTRONICS', matched_prod.name, pincode)
 
    it = ShoppingItem(
     list_id=sl.id,
@@ -783,6 +802,22 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
     stock=listing.stock,
     seller=seller.name[:160]
    ))
+ else:
+  if source.price > 0:
+   listing.price = source.price
+  listing.url = source.url or p.url
+  listing.observed_at = datetime.now(timezone.utc)
+  db.add(PriceSnapshot(
+    listing_id=listing.id,
+    price=listing.price,
+    delivery=listing.delivery,
+    total=true_total(listing.price, listing.delivery, listing.tax, listing.fees, listing.coupon, listing.cashback),
+    stock=listing.stock,
+    seller=seller.name[:160]
+   ))
+
+ if source.price > 0:
+  sync_product_store_prices(db, product, source.price, product.category or 'ELECTRONICS', product.name, pincode)
 
  sl=user_list(db,u)
  item=ShoppingItem(list_id=sl.id,name=product.name[:500],quantity=1,target_price=p.target_price,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)

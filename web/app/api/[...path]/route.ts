@@ -54,9 +54,9 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
   const urlObj = new URL(request.url);
   const search = urlObj.search;
 
-  // Deep analytical endpoints (live web scraping, batch processing, decision lab) need up to 90s
-  const isLongRunning = ['url-analyze', 'process', 'decision-lab', 'analyze', 'sync'].some(p => pathStr.includes(p));
-  const proxyTimeoutMs = isLongRunning ? 90000 : 20000;
+  // Deep analytical endpoints (live web scraping, batch processing, decision lab, URL adding) need up to 90s
+  const isLongRunning = ['url-analyze', 'process', 'decision-lab', 'analyze', 'sync', 'items', 'intent'].some(p => pathStr.includes(p));
+  const proxyTimeoutMs = isLongRunning ? 90000 : 30000;
 
   let lastError: any = null;
 
