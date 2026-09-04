@@ -240,11 +240,10 @@ class BrowserAgent:
                 ('Flipkart', 'flipkart.com', f'https://www.flipkart.com/search?q={urllib.parse.quote_plus(clean_search)}', 'div.Nx9bqj'),
                 ('Croma', 'croma.com', f'https://www.croma.com/searchB?q={urllib.parse.quote_plus(clean_search)}', 'span.amount'),
             ]
-
             for store_name, domain, search_url, price_selector in competitors_to_check:
                 try:
-                    page.goto(search_url, wait_until='domcontentloaded', timeout=10000)
-                    page.wait_for_timeout(600)
+                    page.goto(search_url, wait_until='domcontentloaded', timeout=4000)
+                    page.wait_for_timeout(300)
                     s_soup = BeautifulSoup(page.content(), 'html.parser')
                     s_price_el = s_soup.select_one(price_selector)
                     if s_price_el:
