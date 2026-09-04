@@ -553,7 +553,8 @@ def update_item(item_id:int,p:ItemUpdate,u=Depends(current_user),db:Session=Depe
 @app.delete('/api/items/{item_id}')
 def delete_item(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
- if not it:raise HTTPException(404,'Item not found')
+ if not it:
+  return {'ok': True, 'already_deleted': True}
  db.query(MonitoringTask).filter_by(item_id=it.id).delete()
  db.query(PriceAlert).filter_by(item_id=it.id).delete()
  db.query(ItemVote).filter_by(item_id=it.id).delete()
