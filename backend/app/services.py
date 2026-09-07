@@ -281,7 +281,7 @@ def detect_product_domain(name: str) -> str:
         'butter', 'milk', 'cheese', 'paneer', 'curd', 'bread', 'jam', 'sauce', 'ketchup', 'egg', 'eggs', 'rice', 'atta',
         'flour', 'dal', 'edible oil', 'cooking oil', 'ghee', 'sugar', 'salt', 'tea powder', 'tea bags', 'coffee beans', 'instant coffee', 'maggi', 'noodle', 'noodles', 'biscuit', 'biscuits',
         'chips', 'snack', 'snacks', 'vegetable', 'vegetables', 'fruit', 'fruits', 'apple', 'banana', 'mango', 'lemon', 'coriander',
-        'mint', 'grocery', 'veggie', 'detergent', 'dishwash'
+        'mint', 'grocery', 'veggie', 'detergent', 'dishwash', 'pickle', 'pickles', 'pickel', 'pickels', 'achar'
     ]
     if any(re.search(rf'\b{re.escape(k)}s?\b', n) for k in grocery_kw):
         return 'GROCERY'

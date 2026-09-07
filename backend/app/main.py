@@ -1202,6 +1202,16 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
    store_target_url = f"https://www.amazon.in/s?k={clean_q}"
   elif 'flipkart' in st_name:
    store_target_url = f"https://www.flipkart.com/search?q={clean_q}"
+  elif 'blinkit' in st_name:
+   store_target_url = f"https://blinkit.com/s/?q={clean_q}"
+  elif 'zepto' in st_name:
+   store_target_url = f"https://www.zeptonow.com/search?q={clean_q}"
+  elif 'bigbasket' in st_name:
+   store_target_url = f"https://www.bigbasket.com/ps/?q={clean_q}"
+  elif 'swiggy' in st_name or 'instamart' in st_name:
+   store_target_url = f"https://www.swiggy.com/instamart/search?query={clean_q}"
+  elif 'jiomart' in st_name:
+   store_target_url = f"https://www.jiomart.com/search/{clean_q}"
   elif 'croma' in st_name:
    store_target_url = f"https://www.croma.com/search/?q={clean_q}"
   elif 'reliance' in st_name:
