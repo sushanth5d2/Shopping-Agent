@@ -402,7 +402,67 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
   'tommy hilfiger': 'Tommy Hilfiger', 'calvin klein': 'Calvin Klein', 'zara': 'Zara', 'h&m': 'H&M',
   'marks & spencer': 'Marks & Spencer', 'flying machine': 'Flying Machine', 'pepe jeans': 'Pepe Jeans',
   'spykar': 'Spykar', 'mufti': 'Mufti', 'blackberrys': 'Blackberrys', 'park avenue': 'Park Avenue',
-  'wrogn': 'WROGN', 'roadster': 'Roadster', 'highlander': 'Highlander'
+  'wrogn': 'WROGN', 'roadster': 'Roadster', 'highlander': 'Highlander',
+  # Beauty & Skincare
+  'nykaa': 'Nykaa', 'maybelline': 'Maybelline', 'lakme': 'Lakme', "l'oreal": "L'Oreal",
+  'loreal': "L'Oreal", 'minimalist': 'Minimalist', 'the ordinary': 'The Ordinary', 'ordinary': 'The Ordinary',
+  'cetaphil': 'Cetaphil', 'neutrogena': 'Neutrogena', 'mamaearth': 'Mamaearth', 'plum': 'Plum',
+  'biotique': 'Biotique', 'kama ayurveda': 'Kama Ayurveda', 'forest essentials': 'Forest Essentials',
+  'sugar cosmetics': 'Sugar Cosmetics', 'dot & key': 'Dot & Key', 'garnier': 'Garnier', 'nivea': 'Nivea',
+  # Luggage & Travel Bags
+  'american tourister': 'American Tourister', 'safari': 'Safari', 'vip': 'VIP',
+  'samsonite': 'Samsonite', 'skybags': 'Skybags', 'aristocrat': 'Aristocrat',
+  'mokobara': 'Mokobara', 'delsey': 'Delsey', 'wildcraft': 'Wildcraft',
+  # Furniture & Mattresses
+  'wakefit': 'Wakefit', 'sleepwell': 'Sleepwell', 'kurlon': 'Kurlon', 'kurl-on': 'Kurlon',
+  'pepperfry': 'Pepperfry', 'urban ladder': 'Urban Ladder', 'duroflex': 'Duroflex',
+  'green soul': 'Green Soul', 'godrej interio': 'Godrej Interio',
+  # Fitness & Sports
+  'decathlon': 'Decathlon', 'cultsport': 'Cultsport', 'cosco': 'Cosco', 'nivia': 'Nivia',
+  'yonex': 'Yonex', 'li-ning': 'Li-Ning', 'spalding': 'Spalding', 'boldfit': 'Boldfit',
+  'strauss': 'Strauss', 'fitkit': 'Fitkit',
+  # Cookware & Kitchen
+  'hawkins': 'Hawkins', 'vinod': 'Vinod', 'meyer': 'Meyer', 'stahl': 'Stahl', 'pigeon': 'Pigeon',
+  # Baby & Toys
+  'firstcry': 'FirstCry', 'pampers': 'Pampers', 'huggies': 'Huggies', 'mamypoko': 'MamyPoko',
+  'sebamed': 'Sebamed', 'chicco': 'Chicco', 'lego': 'Lego', 'hamleys': 'Hamleys',
+  'hot wheels': 'Hot Wheels', 'fisher-price': 'Fisher-Price', 'funskool': 'Funskool',
+  'nerf': 'Nerf', 'barbie': 'Barbie', 'himalaya baby': 'Himalaya Baby',
+  # Books & Publishing
+  'penguin': 'Penguin', 'harpercollins': 'HarperCollins', 'oxford': 'Oxford',
+  'rupa': 'Rupa', 'westland': 'Westland', 'scholastic': 'Scholastic',
+  # Automotive & Bike Accessories
+  'vega': 'Vega', 'steelbird': 'Steelbird', 'studds': 'Studds', 'axor': 'Axor',
+  'mt helmets': 'MT Helmets', 'rynox': 'Rynox', '70mai': '70mai', 'qubo': 'Qubo',
+  'royal enfield': 'Royal Enfield', 'castrol': 'Castrol', 'motul': 'Motul',
+  # Musical Instruments
+  'yamaha': 'Yamaha', 'fender': 'Fender', 'gibson': 'Gibson', 'ibanez': 'Ibanez',
+  'roland': 'Roland', 'epiphone': 'Epiphone', 'shure': 'Shure', 'focusrite': 'Focusrite',
+  'bajaao': 'Bajaao', 'vault': 'Vault', 'kadence': 'Kadence',
+  # Tools & Hardware
+  'dewalt': 'DeWalt', 'makita': 'Makita', 'taparia': 'Taparia', 'dongcheng': 'Dongcheng',
+  'ingco': 'Ingco', 'cheston': 'Cheston', 'black+decker': 'Black+Decker', 'stanley': 'Stanley',
+  # Pet Supplies
+  'pedigree': 'Pedigree', 'royal canin': 'Royal Canin', 'whiskas': 'Whiskas',
+  'drools': 'Drools', 'supertails': 'Supertails', 'heads up for tails': 'Heads Up For Tails',
+  'purina': 'Purina', 'sheba': 'Sheba',
+  # Gaming & Consoles
+  'playstation': 'PlayStation', 'xbox': 'Xbox', 'nintendo': 'Nintendo', 'razer': 'Razer',
+  'logitech g': 'Logitech G', 'hyperx': 'HyperX', 'steelseries': 'SteelSeries',
+  # Cameras & Optics
+  'canon': 'Canon', 'nikon': 'Nikon', 'fujifilm': 'Fujifilm', 'gopro': 'GoPro',
+  'dji': 'DJI', 'insta360': 'Insta360', 'celestron': 'Celestron', 'sigma': 'Sigma', 'tamron': 'Tamron',
+  # Jewelry & Eyewear
+  'lenskart': 'Lenskart', 'vincent chase': 'Vincent Chase', 'john jacobs': 'John Jacobs',
+  'ray-ban': 'Ray-Ban', 'tanishq': 'Tanishq', 'caratlane': 'CaratLane', 'giva': 'GIVA',
+  'mia by tanishq': 'Mia by Tanishq', 'kalyan': 'Kalyan Jewellers',
+  # Home Furnishing & Decor
+  "d'decor": "D'Decor", 'bombay dyeing': 'Bombay Dyeing', 'spaces': 'Spaces', 'trident': 'Trident',
+  'story@home': 'Story@Home', 'portico': 'Portico New York',
+  # Office & Stationery
+  'parker': 'Parker', 'faber-castell': 'Faber-Castell', 'camlin': 'Camlin',
+  'classmate': 'Classmate', 'staedtler': 'Staedtler', 'pilot': 'Pilot', 'uni-ball': 'Uni-ball',
+  'lamy': 'Lamy', 'moleskine': 'Moleskine', 'cross': 'Cross'
  }
  clean_lower = clean.lower()
  # Check longer matches first to avoid prefix collisions
