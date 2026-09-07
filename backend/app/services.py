@@ -5538,22 +5538,185 @@ def get_review_intelligence(product_name: str, category: str = '', pref=None) ->
         'sources_searched': total_reviews,
     }
 
+def calculate_store_checkout(store_name: str, subtotal: float) -> dict:
+    """Calculates realistic store checkout breakdown including MOV, delivery fee, handling fee, and cart coupons."""
+    s = (store_name or '').lower()
+    subtotal = float(subtotal or 0.0)
+    delivery_fee = 0.0
+    handling_fee = 0.0
+    small_cart_fee = 0.0
+    coupon_code = ''
+    coupon_discount = 0.0
+    free_delivery_threshold = 199.0
+    delivery_time = '10-15 mins'
+
+    if 'blinkit' in s:
+        free_delivery_threshold = 199.0
+        handling_fee = 4.0
+        delivery_time = '10 mins'
+        if subtotal < 99.0:
+            small_cart_fee = 20.0
+            delivery_fee = 25.0
+        elif subtotal < 199.0:
+            delivery_fee = 25.0
+        else:
+            delivery_fee = 0.0
+        if subtotal >= 299.0:
+            coupon_code = 'FLAT50'
+            coupon_discount = 50.0
+
+    elif 'zepto' in s:
+        free_delivery_threshold = 149.0
+        handling_fee = 5.0
+        delivery_time = '10 mins'
+        if subtotal < 99.0:
+            small_cart_fee = 20.0
+            delivery_fee = 30.0
+        elif subtotal < 149.0:
+            delivery_fee = 30.0
+        else:
+            delivery_fee = 0.0
+        if subtotal >= 249.0:
+            coupon_code = 'SAVE40'
+            coupon_discount = 40.0
+
+    elif 'bigbasket' in s or 'bbnow' in s:
+        free_delivery_threshold = 199.0
+        handling_fee = 3.0
+        delivery_time = '15 mins'
+        if subtotal < 199.0:
+            delivery_fee = 25.0
+        else:
+            delivery_fee = 0.0
+        if subtotal >= 299.0:
+            coupon_code = 'BBFRESH'
+            coupon_discount = 50.0
+
+    elif 'instamart' in s or 'swiggy' in s:
+        free_delivery_threshold = 199.0
+        handling_fee = 5.0
+        delivery_time = '15 mins'
+        if subtotal < 99.0:
+            small_cart_fee = 15.0
+            delivery_fee = 30.0
+        elif subtotal < 199.0:
+            delivery_fee = 30.0
+        else:
+            delivery_fee = 0.0
+        if subtotal >= 299.0:
+            coupon_code = 'INSTABEST'
+            coupon_discount = min(50.0, round(subtotal * 0.15, 2))
+
+    elif 'amazon' in s:
+        free_delivery_threshold = 499.0
+        handling_fee = 0.0
+        delivery_time = 'Same Day'
+        delivery_fee = 0.0 if subtotal >= 499.0 else 40.0
+        if subtotal >= 1000.0:
+            coupon_code = 'AMZNSAVE'
+            coupon_discount = 100.0
+
+    elif 'flipkart' in s:
+        free_delivery_threshold = 500.0
+        handling_fee = 5.0
+        delivery_time = 'Next Day'
+        delivery_fee = 0.0 if subtotal >= 500.0 else 40.0
+        if subtotal >= 1000.0:
+            coupon_code = 'FKSAVE'
+            coupon_discount = 100.0
+
+    else:
+        free_delivery_threshold = 0.0
+        delivery_fee = 0.0
+        handling_fee = 0.0
+        delivery_time = 'Standard'
+
+    extra_fees = delivery_fee + handling_fee + small_cart_fee
+    final_payable = max(0.0, round(subtotal + extra_fees - coupon_discount, 2))
+    return {
+        'store': store_name,
+        'subtotal': round(subtotal, 2),
+        'delivery_fee': delivery_fee,
+        'handling_fee': handling_fee,
+        'small_cart_fee': small_cart_fee,
+        'coupon_code': coupon_code,
+        'coupon_discount': coupon_discount,
+        'free_delivery_threshold': free_delivery_threshold,
+        'free_delivery_unlocked': subtotal >= free_delivery_threshold if free_delivery_threshold > 0 else True,
+        'delivery_time': delivery_time,
+        'final_payable': final_payable
+    }
+
 def basket(items, mode='CHEAPEST'):
     from itertools import product
-    if not items: return {'total': 0, 'stores': {}, 'savings': 0, 'strategy': mode}
+    if not items:
+        return {'total': 0, 'stores': {}, 'savings': 0, 'strategy': mode, 'single_store_comparisons': []}
+
+    # 1. Collect all distinct stores across items
+    all_stores = set()
+    for it in items:
+        for l in it.get('listings', []):
+            all_stores.add(l['store'])
+
+    # 2. Compute Single-Store Options for stores stocking all items
+    single_store_comparisons = []
+    for store in all_stores:
+        can_fulfill_all = True
+        store_subtotal = 0.0
+        for it in items:
+            l_match = next((l for l in it.get('listings', []) if l['store'] == store), None)
+            if l_match:
+                store_subtotal += l_match['total']
+            else:
+                can_fulfill_all = False
+                break
+        if can_fulfill_all:
+            chk = calculate_store_checkout(store, store_subtotal)
+            chk['item_count'] = len(items)
+            single_store_comparisons.append(chk)
+
+    single_store_comparisons.sort(key=lambda x: x['final_payable'])
+
+    # 3. Evaluate multi-item combinations with checkout cost
     best = None
     for combo in product(*[x['listings'] for x in items]):
         stores = {}
-        for x in combo: stores[x['store']] = stores.get(x['store'], 0) + x['total']
-        score = (sum(stores.values()), len(stores)) if mode != 'FEWEST_STORES' else (len(stores), sum(stores.values()))
-        if best is None or score < best[0]: best = (score, stores)
-    individual = sum(min(x['total'] for x in i['listings']) for i in items)
-    total = round(sum(best[1].values()), 2)
+        for x in combo:
+            stores[x['store']] = stores.get(x['store'], 0) + x['total']
+
+        total_payable = 0.0
+        store_details = {}
+        for sname, ssub in stores.items():
+            sc = calculate_store_checkout(sname, ssub)
+            store_details[sname] = sc
+            total_payable += sc['final_payable']
+        total_payable = round(total_payable, 2)
+
+        score = (total_payable, len(stores)) if mode != 'FEWEST_STORES' else (len(stores), total_payable)
+        if best is None or score < best[0]:
+            best = (score, stores, store_details, total_payable)
+
+    # 4. Check if a single store beats or matches the combo
+    if single_store_comparisons and (mode == 'FEWEST_STORES' or single_store_comparisons[0]['final_payable'] <= best[3]):
+        best_single = single_store_comparisons[0]
+        winning_stores = {best_single['store']: best_single['final_payable']}
+        winning_details = {best_single['store']: best_single}
+        final_total = best_single['final_payable']
+    else:
+        winning_stores = {k: v['final_payable'] for k, v in best[2].items()}
+        winning_details = best[2]
+        final_total = best[3]
+
+    individual_sum = sum(min(x['total'] for x in i['listings']) for i in items)
+    savings = round(max(0, individual_sum - final_total), 2) if final_total <= individual_sum else 0.0
+
     return {
-        'total': total,
-        'stores': best[1],
-        'individual_cheapest': round(individual, 2),
-        'savings': round(max(0, individual - total), 2),
+        'total': final_total,
+        'stores': winning_stores,
+        'checkout_breakdown': winning_details,
+        'single_store_comparisons': single_store_comparisons,
+        'individual_cheapest': round(individual_sum, 2),
+        'savings': savings,
         'strategy': mode
     }
 

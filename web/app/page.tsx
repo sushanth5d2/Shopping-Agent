@@ -1806,24 +1806,88 @@ function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [],
             <p style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 14 }}>
               ShopAgent splits your shopping needs across verified retailers to ensure you get the absolute lowest combined total. Click <b>Buy Later</b> on previous items to postpone them so they don't block your current checkout.
             </p>
-            {Object.keys(stores).length ? Object.entries(stores).map(([storeName, amount]: any) => (
-              <div className="completed-row" key={storeName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#1e293b', borderRadius: 8, marginBottom: 8 }}>
-                <div>
-                  <b style={{ fontSize: 15, color: '#fff' }}>{storeName}</b>
-                  <small style={{ display: 'block', color: '#94a3b8' }}>Verified retail partner basket</small>
+            {Object.keys(stores).length ? Object.entries(stores).map(([storeName, amount]: any) => {
+              const chk = data?.checkout_breakdown?.[storeName];
+              return (
+                <div className="completed-row" key={storeName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#1e293b', borderRadius: 8, marginBottom: 8 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <b style={{ fontSize: 15, color: '#fff' }}>{storeName}</b>
+                      {chk?.coupon_code ? (
+                        <span style={{ fontSize: 10, background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>
+                          Coupon {chk.coupon_code}: -₹{chk.coupon_discount}
+                        </span>
+                      ) : null}
+                      {chk?.delivery_fee === 0 ? (
+                        <span style={{ fontSize: 10, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>
+                          Free Delivery
+                        </span>
+                      ) : null}
+                    </div>
+                    <small style={{ display: 'block', color: '#94a3b8', marginTop: 2 }}>
+                      {chk ? `Items ₹${chk.subtotal} + Delivery ₹${chk.delivery_fee} + Fees ₹${chk.handling_fee}${chk.coupon_discount ? ` - Coupon ₹${chk.coupon_discount}` : ''}` : 'Verified retail partner basket'}
+                    </small>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <strong style={{ fontSize: 16, color: '#38bdf8' }}>₹{Number(amount).toLocaleString()}</strong>
+                    <button
+                      className="primary"
+                      style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      onClick={() => handleCheckoutStore(storeName)}
+                    >
+                      <span>Checkout ↗</span>
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <strong style={{ fontSize: 16, color: '#38bdf8' }}>₹{Number(amount).toLocaleString()}</strong>
-                  <button
-                    className="primary"
-                    style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                    onClick={() => handleCheckoutStore(storeName)}
-                  >
-                    <span>Checkout ↗</span>
-                  </button>
+              );
+            }) : <Empty text="No items currently eligible for basket optimization." />}
+
+            {/* All-In-One Store Checkout Comparison Matrix */}
+            {data?.single_store_comparisons && data.single_store_comparisons.length > 1 && (
+              <div style={{ marginTop: 14, marginBottom: 14, padding: '14px 16px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={14} color="#38bdf8" />
+                    <b style={{ fontSize: 13, color: '#e2e8f0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      All-In-One Single Store Comparison ({todo.length} items)
+                    </b>
+                  </div>
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                    Comparing final net checkout payable
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {data.single_store_comparisons.map((sc: any, idx: number) => (
+                    <div key={sc.store} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: idx === 0 ? 'rgba(34, 197, 94, 0.08)' : 'rgba(30, 41, 59, 0.4)', border: idx === 0 ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 8, fontSize: 13 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, color: idx === 0 ? '#4ade80' : '#e2e8f0' }}>{sc.store}</span>
+                        {idx === 0 && (
+                          <span style={{ fontSize: 10, background: '#22c55e', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 800 }}>
+                            BEST VALUE
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                          Items ₹{sc.subtotal} • Delivery {sc.delivery_fee === 0 ? <span style={{ color: '#4ade80' }}>₹0</span> : `₹${sc.delivery_fee}`} • Fees ₹{sc.handling_fee}
+                          {sc.coupon_discount > 0 ? <span style={{ color: '#f59e0b' }}> • Coupon {sc.coupon_code} (-₹{sc.coupon_discount})</span> : null}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <strong style={{ fontSize: 14, color: idx === 0 ? '#4ade80' : '#cbd5e1' }}>
+                          ₹{Number(sc.final_payable).toLocaleString()}
+                        </strong>
+                        <button
+                          className="secondary"
+                          style={{ padding: '4px 10px', fontSize: 11 }}
+                          onClick={() => handleCheckoutStore(sc.store)}
+                        >
+                          Checkout ↗
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            )) : <Empty text="No items currently eligible for basket optimization." />}
+            )}
 
             {/* Todo Items in Cart List */}
             {todo.length > 0 && (
