@@ -1115,7 +1115,7 @@ def deals(u=Depends(current_user),db:Session=Depends(get_db)):
   hist=[x.total for l in db.query(StoreListing).filter_by(product_id=it.product_id).all() for x in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()]
   avg=sum(hist)/len(hist) if hist else c['best']['true_total']; drop=round((avg-c['best']['true_total'])/avg*100,1) if avg else 0
   d=decision(c['best']['true_total'],it.target_price,hist)
-  out.append({'product':c['product'],'product_id':it.product_id,'price':c['best']['true_total'],'discount_percent':drop,'decision':d['decision'],'reason':d['reason']})
+  out.append({'product':c['product'],'product_id':it.product_id,'item_id':it.id,'price':c['best']['true_total'],'discount_percent':drop,'decision':d['decision'],'reason':d['reason']})
  return {'deals':sorted(out,key=lambda x:x['discount_percent'],reverse=True)}
 
 @app.get('/api/agent/health')
@@ -1126,11 +1126,23 @@ def agent_health(u=Depends(current_user),db:Session=Depends(get_db)):
 @app.get('/api/notifications')
 def notifications(u=Depends(current_user),db:Session=Depends(get_db)):
  return [{'id':n.id,'kind':n.kind,'title':n.title,'message':n.message,'read':n.read,'created_at':n.created_at} for n in db.query(Notification).filter_by(user_id=u.id).order_by(Notification.created_at.desc()).limit(100)]
+
 @app.post('/api/items/{item_id}/checkout')
 def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency-Key'),u=Depends(current_user),db:Session=Depends(get_db)):
  from .services import PurchasePolicy
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
- if not it: raise HTTPException(404,'Item not found')
+ if not it:
+  # Self-heal: check if item_id was passed as a Product.id (e.g. from Deals or Decision Lab)
+  prod = db.get(Product, item_id)
+  if prod:
+   sl = user_list(db, u)
+   it = db.query(ShoppingItem).filter_by(list_id=sl.id, product_id=prod.id).first()
+   if not it:
+    it = ShoppingItem(list_id=sl.id, product_id=prod.id, name=prod.name, target_price=None, mode='BUY_NOW', status='TODO')
+    db.add(it)
+    db.flush()
+  else:
+   raise HTTPException(404, 'Item not found')
  if not it.product_id:
   prod = find_or_create_product_for_name(db, it.name)
   it.product_id = prod.id
@@ -1183,6 +1195,21 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Purchase initiated for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). User action required to complete. Verified savings: ₹{savings_val:,.2f}."))
  db.commit()
  store_target_url = best.get('url', '')
+ if not store_target_url:
+  clean_q = __import__("urllib.parse").parse.quote_plus(it.name[:40])
+  st_name = (best.get('store') or '').lower()
+  if 'amazon' in st_name:
+   store_target_url = f"https://www.amazon.in/s?k={clean_q}"
+  elif 'flipkart' in st_name:
+   store_target_url = f"https://www.flipkart.com/search?q={clean_q}"
+  elif 'croma' in st_name:
+   store_target_url = f"https://www.croma.com/search/?q={clean_q}"
+  elif 'reliance' in st_name:
+   store_target_url = f"https://www.reliancedigital.in/search?q={clean_q}"
+  elif 'myntra' in st_name:
+   store_target_url = f"https://www.myntra.com/{clean_q}"
+  else:
+   store_target_url = f"https://www.google.com/search?q={clean_q}+buy+online"
  return {
   'status': 'PENDING_USER_ACTION',
   'order_number': order_num,

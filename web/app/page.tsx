@@ -213,6 +213,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [aiStatus, setAiStatus] = useState<any>(null);
   const [activeReceipt, setActiveReceipt] = useState<any>(null);
+  const [checkoutHandoff, setCheckoutHandoff] = useState<any>(null);
   const [preferences, setPreferences] = useState<any>({
     global_max_order: 10000,
     monthly_max: 50000,
@@ -529,18 +530,49 @@ export default function App() {
 
   const buy = async (id: number) => {
     setBusy(true);
+    // Pre-open a blank tab synchronously within user click event to bypass browser popup blockers
+    let storeWindow: Window | null = null;
+    try {
+      storeWindow = window.open('about:blank', '_blank');
+    } catch {
+      // Handled if browser strictly disallows synchronous window.open
+    }
+
     try {
       const x = await req(`/api/items/${id}/checkout`, {
         method: 'POST',
         headers: { 'Idempotency-Key': crypto.randomUUID() }
       });
-      setToast(x.message || 'Opening retailer store...');
       const targetUrl = x.store_url || x.url;
+
       if (targetUrl) {
-        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+        if (storeWindow && !storeWindow.closed) {
+          storeWindow.location.href = targetUrl;
+        } else {
+          try {
+            window.open(targetUrl, '_blank', 'noopener,noreferrer');
+          } catch {}
+        }
+      } else if (storeWindow && !storeWindow.closed) {
+        storeWindow.close();
       }
+
+      setCheckoutHandoff({
+        orderNumber: x.order_number,
+        product: x.product || 'Product',
+        store: x.store || 'Retail Partner',
+        url: targetUrl,
+        total: x.total,
+        message: x.message,
+        savings: x.savings
+      });
+
+      setToast(x.message || `Routing to ${x.store || 'retailer'}...`);
       await load();
     } catch (e: any) {
+      if (storeWindow && !storeWindow.closed) {
+        storeWindow.close();
+      }
       setToast(e.message);
     } finally {
       setBusy(false);
@@ -722,6 +754,7 @@ export default function App() {
               data={decisionData}
               onSelectProduct={openDecisionLab}
               onSwap={swapItem}
+              onBuy={buy}
               onRefresh={async (targetPid?: number) => {
                 const pidToRefresh = targetPid || decisionPid || (decisionData && decisionData.product_id) || (items.find((x: any) => x.product_id)?.product_id);
                 if (pidToRefresh) {
@@ -732,7 +765,18 @@ export default function App() {
               refreshing={busy}
             />
           )}
-          {tab === 'Master Cart' && <MasterCartPage data={basketData} strategy={basketStrategy} setStrategy={async (st: string) => { setBasketStrategy(st); setBasketData(await req(`/api/basket?strategy=${st}`)); }} todo={todo} buyItem={buy} onCheckoutAll={async () => { for (const it of todo) { await buy(it.id); } setTab('Orders'); }} />}
+          {tab === 'Master Cart' && (
+            <MasterCartPage
+              data={basketData}
+              strategy={basketStrategy}
+              setStrategy={async (st: string) => {
+                setBasketStrategy(st);
+                setBasketData(await req(`/api/basket?strategy=${st}`));
+              }}
+              todo={todo}
+              buyItem={buy}
+            />
+          )}
           {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} onScanInvoice={async (txt: string) => { const res = await req('/api/invoices/scan', { method: 'POST', body: JSON.stringify({ text: txt }) }); for (const it of res.items) { await addNewItem(it.item, it.price); } setToast(`Imported ${res.items.length} items from scanned invoice!`); }} />}
           {tab === 'Monitoring' && <Monitoring rows={monitor} refresh={load} openDecisionLab={openDecisionLab} onCheck={triggerPriceCheck} onDelete={deleteMonitor} />}
           {tab === 'Deals' && <Deals deals={deals} openDecisionLab={openDecisionLab} buy={buy} />}
@@ -744,6 +788,7 @@ export default function App() {
         </div>
       </main>
       {activeReceipt && <ReceiptModal receipt={activeReceipt} onClose={() => setActiveReceipt(null)} />}
+      {checkoutHandoff && <CheckoutHandoffModal handoff={checkoutHandoff} onClose={() => setCheckoutHandoff(null)} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -1169,7 +1214,7 @@ function PriceHistoryChart({ tracker, currentPrice }: { tracker: any; currentPri
   );
 }
 
-function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, onRefresh, refreshing }: any) {
+function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, onRefresh, refreshing, onBuy }: any) {
   const productItems = items.filter((x: any) => x.product_id);
   const activePid = selectedPid || (data && data.product_id) || (productItems[0]?.product_id);
   const linkedItem = items.find((x: any) => x.product_id === activePid);
@@ -1303,6 +1348,20 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
                   <b style={{ fontSize: 12, color: isBuy ? '#34d399' : isDont ? '#f87171' : '#fbbf24', letterSpacing: '0.05em', display: 'block', marginBottom: 2 }}>RECOMMENDED ACTION</b>
                   <span style={{ fontSize: 13, color: '#e2e8f0', lineHeight: 1.5 }}>{dec.action}</span>
                 </div>
+              </div>
+            )}
+
+            {onBuy && (
+              <div style={{ marginTop: 14, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className={isBuy ? 'primary' : 'secondary'}
+                  onClick={() => onBuy(linkedItemId)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', fontSize: 14, fontWeight: 700, borderRadius: 8 }}
+                >
+                  <Zap size={16} />
+                  <span>{isBuy ? `Buy Now at ${data.best_store || 'Verified Store'} (₹${Number(data.current_price).toLocaleString()})` : `Checkout at ${data.best_store || 'Store'} Anyway (₹${Number(data.current_price).toLocaleString()})`}</span>
+                </button>
               </div>
             )}
           </div>
@@ -1668,14 +1727,21 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
   );
 }
 
-function MasterCartPage({ data, strategy, setStrategy, todo, onCheckoutAll }: any) {
+function MasterCartPage({ data, strategy, setStrategy, todo, buyItem }: any) {
   const stores = data?.stores || {};
   const total = Number(data?.total || 0);
   const savings = Number(data?.savings || 0);
 
+  const handleCheckoutStore = (storeName: string) => {
+    const matched = todo.find((it: any) => it.decision?.best_store?.toLowerCase().includes(storeName.toLowerCase())) || todo[0];
+    if (matched) {
+      buyItem(matched.id);
+    }
+  };
+
   return (
     <div className="stack">
-      <PageTitle eyebrow="MULTI-STORE OPTIMIZER" title="Master Cart" meta={`${todo.length} products optimized`} />
+      <PageTitle eyebrow="MULTI-STORE OPTIMIZER" title="Master Cart" meta={`${todo.length} products in shopping plan`} />
       <div className="panel">
         <div className="panel-head">
           <div><span className="eyebrow">OPTIMIZATION STRATEGY</span><h3>Cross-Store Cart</h3></div>
@@ -1687,14 +1753,47 @@ function MasterCartPage({ data, strategy, setStrategy, todo, onCheckoutAll }: an
         <div className="dashboard-grid">
           <div>
             <p style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 14 }}>
-              ShopAgent splits your shopping needs across verified retailers to ensure you get the absolute lowest combined total.
+              ShopAgent splits your shopping needs across verified retailers to ensure you get the absolute lowest combined total. Click checkout for any store or item below.
             </p>
             {Object.keys(stores).length ? Object.entries(stores).map(([storeName, amount]: any) => (
-              <div className="completed-row" key={storeName}>
-                <div><b>{storeName}</b><small>Verified retail partner</small></div>
-                <strong>₹{Number(amount).toLocaleString()}</strong>
+              <div className="completed-row" key={storeName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#1e293b', borderRadius: 8, marginBottom: 8 }}>
+                <div>
+                  <b style={{ fontSize: 15, color: '#fff' }}>{storeName}</b>
+                  <small style={{ display: 'block', color: '#94a3b8' }}>Verified retail partner basket</small>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <strong style={{ fontSize: 16, color: '#38bdf8' }}>₹{Number(amount).toLocaleString()}</strong>
+                  <button
+                    className="primary"
+                    style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    onClick={() => handleCheckoutStore(storeName)}
+                  >
+                    <span>Checkout ↗</span>
+                  </button>
+                </div>
               </div>
             )) : <Empty text="No items currently eligible for basket optimization." />}
+
+            {/* Todo Items in Cart List */}
+            {todo.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <h4 style={{ fontSize: 13, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, fontWeight: 700 }}>Items in Plan ({todo.length})</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {todo.map((it: any) => (
+                    <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, fontSize: 13 }}>
+                      <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{cleanProductName(it.name, 45)}</span>
+                      <button
+                        className="secondary"
+                        style={{ padding: '5px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                        onClick={() => buyItem(it.id)}
+                      >
+                        <span>Buy Now ↗</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="stat-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
             <div>
@@ -1702,7 +1801,15 @@ function MasterCartPage({ data, strategy, setStrategy, todo, onCheckoutAll }: an
               <b style={{ fontSize: 32, color: '#fff' }}>₹{total.toLocaleString()}</b>
               <small style={{ color: '#22c55e', fontSize: 13 }}>Saved ₹{savings.toLocaleString()} vs single store</small>
             </div>
-            <button className="primary wide" onClick={onCheckoutAll}>Proceed to Checkout Handoff <Zap size={14} /></button>
+            {todo.length > 0 ? (
+              <button className="primary wide" onClick={() => buyItem(todo[0].id)}>
+                Proceed to Checkout Handoff <Zap size={14} />
+              </button>
+            ) : (
+              <button className="primary wide" disabled>
+                Cart is Empty
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1816,7 +1923,7 @@ function Deals({ deals, openDecisionLab, buy }: any) {
             <p>{d.reason}</p>
             <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
               <button className="secondary" style={{ flex: 1 }} onClick={() => openDecisionLab(d.product_id)}>Decision Lab <Sparkles size={13} /></button>
-              <button className="primary" style={{ flex: 1 }} onClick={() => buy(d.product_id)}>Buy Now</button>
+              <button className="primary" style={{ flex: 1 }} onClick={() => buy(d.item_id || d.product_id)}>Buy Now</button>
             </div>
           </div>
         )) : <Empty text="No deal signals available yet." />}
@@ -1942,6 +2049,137 @@ function ReceiptModal({ receipt, onClose }: any) {
             )}
             <button className="primary" onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
               <FileText size={14} /> Print / Save PDF
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CheckoutHandoffModal({ handoff, onClose }: any) {
+  if (!handoff) return null;
+  const store = handoff.store || 'Retail Partner';
+  const isAmazon = store.toLowerCase().includes('amazon');
+  const isFlipkart = store.toLowerCase().includes('flipkart');
+  const isCroma = store.toLowerCase().includes('croma');
+  const isReliance = store.toLowerCase().includes('reliance');
+
+  const storeBadgeColor = isAmazon ? '#f59e0b' : isFlipkart ? '#3b82f6' : isCroma ? '#06b6d4' : isReliance ? '#ef4444' : '#10b981';
+
+  return (
+    <div className="modal-backdrop" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
+      <div className="panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 16, padding: 28, maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: 16, marginBottom: 20 }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
+              <Zap size={13} /> Retailer Checkout Handoff Active
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: '#fff' }}>Proceed to Final Payment</h2>
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>ShopAgent verified lowest price and staged your purchase directly at the retailer.</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}><X size={20} /></button>
+        </div>
+
+        {/* Order Details Card */}
+        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+            <div style={{ flex: 1, paddingRight: 12 }}>
+              <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Staged Product</span>
+              <h4 style={{ fontSize: 15, color: '#fff', margin: '2px 0 0', lineHeight: 1.4 }}>{handoff.product}</h4>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Verified Total</span>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#34d399' }}>₹{Number(handoff.total || 0).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, borderTop: '1px solid #334155', paddingTop: 12, fontSize: 12 }}>
+            <div>
+              <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>RETAILER PLATFORM</span>
+              <b style={{ color: storeBadgeColor, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <ShoppingCart size={13} /> {store}
+              </b>
+            </div>
+            <div>
+              <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>INTERNAL ORDER REF</span>
+              <b style={{ color: '#38bdf8', fontSize: 13, fontFamily: 'monospace' }}>{handoff.orderNumber}</b>
+            </div>
+            {handoff.savings && handoff.savings > 0 && (
+              <div style={{ gridColumn: 'span 2', background: 'rgba(16, 185, 129, 0.1)', padding: '6px 10px', borderRadius: 6, color: '#34d399', fontWeight: 600 }}>
+                ✓ Verified savings locked in: ₹{Number(handoff.savings).toLocaleString()}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3-Step Guided Action */}
+        <div style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <h4 style={{ fontSize: 13, color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px', fontWeight: 700 }}>How Checkout Works:</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ background: '#3b82f6', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>1</span>
+              <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4 }}>
+                <strong>Store Tab:</strong> Click the button below to jump directly to <b>{store}</b>.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ background: '#6366f1', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>2</span>
+              <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4 }}>
+                <strong>Cart & Delivery:</strong> The product is staged in your cart or search results. Choose your delivery address.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ background: '#10b981', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>3</span>
+              <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4 }}>
+                <strong>Secure Payment:</strong> Select UPI, Credit/Debit Card, or Net Banking and authenticate with your personal 2FA/OTP.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Primary CTA Button */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {handoff.url ? (
+            <a
+              href={handoff.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="primary wide"
+              style={{
+                textAlign: 'center',
+                padding: '14px 20px',
+                fontSize: 15,
+                fontWeight: 700,
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                borderRadius: 10,
+                boxShadow: '0 4px 14px 0 rgba(99, 102, 241, 0.39)'
+              }}
+            >
+              <span>Open {store} &amp; Complete Payment</span>
+              <ExternalLink size={18} />
+            </a>
+          ) : (
+            <button className="primary wide" onClick={onClose}>
+              Order Staged • Awaiting Retailer Confirmation
+            </button>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+            <span style={{ fontSize: 11, color: '#64748b' }}>
+              Popups blocked? The button above opens store directly without popup blocker interference.
+            </span>
+            <button
+              className="secondary"
+              onClick={onClose}
+              style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6 }}
+            >
+              Dismiss
             </button>
           </div>
         </div>
