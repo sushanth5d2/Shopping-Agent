@@ -5884,6 +5884,45 @@ def calculate_store_checkout(store_name: str, subtotal: float) -> dict:
             coupon_code = 'FKSAVE'
             coupon_discount = 100.0
 
+    elif 'ajio' in s:
+        free_delivery_threshold = 999.0
+        handling_fee = 0.0
+        delivery_time = '2-3 Days'
+        delivery_fee = 0.0 if subtotal >= 999.0 else 99.0
+        if subtotal >= 2499.0:
+            coupon_code = 'AJIOMANIA'
+            coupon_discount = 500.0
+        elif subtotal >= 1000.0:
+            coupon_code = 'AJIOTECH'
+            coupon_discount = min(1500.0, round(subtotal * 0.15, 2))
+
+    elif 'myntra' in s:
+        free_delivery_threshold = 1199.0
+        handling_fee = 0.0
+        delivery_time = '2-3 Days'
+        delivery_fee = 0.0 if subtotal >= 1199.0 else 99.0
+        if subtotal >= 1500.0:
+            coupon_code = 'MYNTRA20'
+            coupon_discount = min(1000.0, round(subtotal * 0.20, 2))
+
+    elif 'croma' in s:
+        free_delivery_threshold = 500.0
+        handling_fee = 0.0
+        delivery_time = '1-2 Days'
+        delivery_fee = 0.0 if subtotal >= 500.0 else 50.0
+        if subtotal >= 5000.0:
+            coupon_code = 'CROMA500'
+            coupon_discount = 500.0
+
+    elif 'reliance' in s or 'digital' in s:
+        free_delivery_threshold = 1000.0
+        handling_fee = 0.0
+        delivery_time = '1-2 Days'
+        delivery_fee = 0.0 if subtotal >= 1000.0 else 99.0
+        if subtotal >= 3000.0:
+            coupon_code = 'RDIGITAL10'
+            coupon_discount = min(2000.0, round(subtotal * 0.10, 2))
+
     else:
         free_delivery_threshold = 0.0
         delivery_fee = 0.0

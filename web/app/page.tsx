@@ -2313,9 +2313,31 @@ function Monitoring({ rows, refresh, openDecisionLab, onCheck, onDelete }: any) 
             <div className="monitor-line" key={m.id}>
               <div className="monitor-product">
                 <div className="product-thumb">{(m.item?.name || 'MP').slice(0, 2).toUpperCase()}</div>
-                <div><b title={m.item?.name || 'Monitored Product'}>{cleanProductName(m.item?.name || 'Monitored Product', 50)}</b><small>{m.item?.purchase_mode || 'MONITOR'} • {m.item?.quantity || 1} unit{(m.item?.quantity || 1) > 1 ? 's' : ''}</small></div>
+                <div>
+                  <b title={m.item?.name || 'Monitored Product'}>{cleanProductName(m.item?.name || 'Monitored Product', 50)}</b>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
+                    <small>{m.item?.purchase_mode || 'MONITOR'} • {m.item?.quantity || 1} unit{(m.item?.quantity || 1) > 1 ? 's' : ''}</small>
+                    {m.tradeoffs?.fastest && (
+                      <span style={{ fontSize: 10, background: 'rgba(14, 165, 233, 0.15)', color: '#38bdf8', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
+                        ⚡ {m.tradeoffs.fastest.store} ({m.tradeoffs.fastest.delivery_time})
+                      </span>
+                    )}
+                    {m.coupons && m.coupons.length > 0 && (
+                      <span style={{ fontSize: 10, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '1px 6px', borderRadius: 4, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                        <Tag size={10} /> {m.coupons[0].code} (-₹{Number(m.coupons[0].discount_amount).toLocaleString()})
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <strong>{m.best?.true_total ? `₹${Number(m.best.true_total).toLocaleString()}` : 'Unavailable'}</strong>
+              <div>
+                <strong>{m.best?.true_total ? `₹${Number(m.best.true_total).toLocaleString()}` : 'Unavailable'}</strong>
+                {m.tradeoffs?.cheapest && m.tradeoffs.cheapest.coupon_code && m.tradeoffs.cheapest.net_effective_price < (m.best?.true_total || 0) && (
+                  <div style={{ fontSize: 11, color: '#34d399', fontWeight: 600, marginTop: 2 }}>
+                    ₹{Number(m.tradeoffs.cheapest.net_effective_price).toLocaleString()} net ({m.tradeoffs.cheapest.coupon_code})
+                  </div>
+                )}
+              </div>
               <span>{m.item?.target_price ? `₹${Number(m.item.target_price).toLocaleString()}` : '—'}</span>
               <span className={`status ${m.status === 'TARGET_REACHED' ? 'green' : 'purple'}`}>{m.status === 'TARGET_REACHED' ? 'TARGET REACHED' : 'MONITORING'}</span>
               <span className="next"><Clock3 size={13} />{m.next_check ? new Date(m.next_check).toLocaleString() : 'scheduled'}</span>

@@ -1080,7 +1080,17 @@ def monitoring(u=Depends(current_user),db:Session=Depends(get_db)):
    db.add(t_mon)
  db.commit()
  for t in db.query(MonitoringTask).join(ShoppingItem).filter(ShoppingItem.list_id==sl.id).all():
-  it=db.get(ShoppingItem,t.item_id);c=product_summary(db,it.product_id,include_details=False) if it.product_id else None;out.append({'id':t.id,'item':item_obj(db,it),'status':t.status,'last_checked':t.last_checked,'next_check':t.next_check,'best':c['best'] if c else None})
+  it=db.get(ShoppingItem,t.item_id);c=product_summary(db,it.product_id,include_details=False) if it.product_id else None
+  out.append({
+      'id':t.id,
+      'item':item_obj(db,it),
+      'status':t.status,
+      'last_checked':t.last_checked,
+      'next_check':t.next_check,
+      'best':c['best'] if c else None,
+      'tradeoffs':c.get('tradeoffs', {}) if c else {},
+      'coupons':c.get('coupons', [])[:3] if c else []
+  })
  return {'items':out, 'tasks':out}
 
 @app.post('/api/monitoring/{task_id}/check')
@@ -1094,6 +1104,7 @@ def manual_monitor_check(task_id:int,u=Depends(current_user),db:Session=Depends(
  now=datetime.now(timezone.utc)
  listings=db.query(StoreListing).filter_by(product_id=prod.id).all()
  best_price=None
+ best_coupon_msg=""
  for l in listings:
   if not l.url or any(k in l.url.lower() for k in ['/s?', '/search', 'google.com', 'bing.com', 'duckduckgo.com']):
    continue
@@ -1103,21 +1114,35 @@ def manual_monitor_check(task_id:int,u=Depends(current_user),db:Session=Depends(
     l.price=obs.price;l.stock=obs.stock;l.observed_at=now
     tot=true_total(obs.price,obs.delivery,obs.tax,obs.fees,obs.coupon,obs.cashback)
     db.add(PriceSnapshot(listing_id=l.id,price=obs.price,delivery=obs.delivery,total=tot,stock=obs.stock,seller=(obs.seller or (l.seller.name if l.seller else 'Verified'))[:160]))
-    if best_price is None or tot<best_price: best_price=tot
+    st = db.get(Store, l.store_id) if l.store_id else None
+    s_canon = canonical_store_name(st.name if st else '')
+    cpns = get_verified_store_coupons(s_canon, obs.price, it.name)
+    net_tot = tot - (cpns[0]['discount_amount'] if cpns else 0)
+    effective_tot = min(tot, net_tot)
+    if best_price is None or effective_tot < best_price:
+     best_price = effective_tot
+     if cpns and effective_tot == net_tot and cpns[0]['discount_amount'] > 0:
+      best_coupon_msg = f" via coupon {cpns[0]['code']} on {s_canon}"
   except Exception: pass
  if best_price is None:
   try:
    c=product_summary(db,prod.id,include_details=False)
    best_price=c['best']['true_total'] if c and c.get('best') else 0.0
+   if c and c.get('tradeoffs', {}).get('cheapest', {}).get('net_effective_price'):
+    cheapest = c['tradeoffs']['cheapest']
+    if cheapest['net_effective_price'] < best_price:
+     best_price = cheapest['net_effective_price']
+     best_coupon_msg = f" via coupon {cheapest.get('coupon_code', '')} on {cheapest.get('store', '')}"
   except Exception: best_price=0.0
  if it.target_price and best_price>0 and best_price<=it.target_price:
   task.status="TARGET_REACHED"
-  msg=f"Target reached for {it.name[:35]}: ₹{best_price:,.0f} (Target: ₹{it.target_price:,.0f})"
+  msg=f"Target reached for {it.name[:35]}: ₹{best_price:,.0f}{best_coupon_msg} (Target: ₹{it.target_price:,.0f})"
   db.add(PriceAlert(item_id=it.id,alert_type="TARGET_REACHED",message=msg))
   db.add(Notification(user_id=u.id,kind="TARGET",title="Target price reached",message=msg))
+  telegram("🎯 "+msg)
  task.last_checked=now;task.next_check=now+timedelta(minutes=task.interval_minutes)
  db.commit()
- return {'ok':True,'status':task.status,'best_price':best_price,'message':f'Price verified: ₹{best_price:,.0f} for {it.name[:35]}'}
+ return {'ok':True,'status':task.status,'best_price':best_price,'message':f'Price verified: ₹{best_price:,.0f}{best_coupon_msg} for {it.name[:35]}'}
 @app.get('/api/deals')
 def deals(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);out=[]
