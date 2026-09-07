@@ -145,6 +145,8 @@ class BrowserAgent:
             # Clean title
             title = re.sub(r'^(Buy\s+|Amazon\.in\s*:\s*|Flipkart\.com\s*:\s*)', '', title, flags=re.I)
             title = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in).*$', '', title, flags=re.I).strip()
+            if ' | ' in title:
+                title = title.split(' | ')[0].strip()
             result.title = title
 
             # Extract Price

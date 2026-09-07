@@ -183,9 +183,10 @@ class JsonLdWebConnector(StoreConnector):
         soup = BeautifulSoup(html, 'html.parser') if html else None
         title = title or (soup.title.string if soup and soup.title else '') or ''
 
-        # Clean title noise like "Amazon.in: Buy ... online" or "Flipkart.com"
         clean_title = re.sub(r'^(Buy\s+|Amazon\.in\s*:\s*|Flipkart\.com\s*:\s*)', '', title, flags=re.I)
         clean_title = re.sub(r'(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in|\s*-\s*Myntra).*$', '', clean_title, flags=re.I).strip()
+        if ' | ' in clean_title:
+            clean_title = clean_title.split(' | ')[0].strip()
         if any(k in clean_title.lower() for k in ['spend less', 'smile more', 'online shopping', 'amazon.in', 'amazon.com', 'flipkart.com', 'flipkart', 'amazon', 'product online', 'home page', 'free shipping', 'low prices', '']):
             clean_title = ''
 

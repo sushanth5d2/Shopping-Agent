@@ -50,6 +50,21 @@ interface Listing {
   card_offers?: Array<{ bank: string; offer: string; effective_price: number; type: string; badge: string }>;
 }
 
+function cleanProductName(rawName?: string, maxLen = 65): string {
+  if (!rawName) return '';
+  let cleaned = rawName
+    .replace(/^(Buy\s+|Amazon\.in\s*:\s*|Flipkart\.com\s*:\s*)/i, '')
+    .replace(/(\s*:\s*Amazon\.in|\s*\|\s*Flipkart|\s*-\s*Amazon\.in).*$/i, '')
+    .trim();
+  if (cleaned.includes(' | ')) {
+    cleaned = cleaned.split(' | ')[0].trim();
+  }
+  if (cleaned.length > maxLen) {
+    cleaned = cleaned.slice(0, maxLen).trim() + '...';
+  }
+  return cleaned;
+}
+
 const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 let refreshMutex: Promise<boolean> | null = null;
@@ -970,7 +985,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
       <div className="page-title">
         <div>
           <span className="eyebrow">INTELLIGENCE LABORATORY</span>
-          <h2>Decision Lab: {data.product}</h2>
+          <h2>Decision Lab: {cleanProductName(data.product, 60)}</h2>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button
@@ -986,7 +1001,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
           {productItems.length > 1 && (
             <select className="batch-target" value={selectedPid || ''} onChange={e => onSelectProduct(Number(e.target.value))}>
               {productItems.map((p: any) => (
-                <option key={p.id} value={p.product_id}>{p.name}</option>
+                <option key={p.id} value={p.product_id}>{cleanProductName(p.name, 45)}</option>
               ))}
             </select>
           )}
@@ -1448,13 +1463,13 @@ function Monitoring({ rows, refresh, openDecisionLab, onCheck, onDelete }: any) 
             <div className="monitor-line" key={m.id}>
               <div className="monitor-product">
                 <div className="product-thumb">{(m.item?.name || 'MP').slice(0, 2).toUpperCase()}</div>
-                <div><b>{m.item?.name || 'Monitored Product'}</b><small>{m.item?.purchase_mode || 'MONITOR'} • {m.item?.quantity || 1} unit{(m.item?.quantity || 1) > 1 ? 's' : ''}</small></div>
+                <div><b title={m.item?.name || 'Monitored Product'}>{cleanProductName(m.item?.name || 'Monitored Product', 50)}</b><small>{m.item?.purchase_mode || 'MONITOR'} • {m.item?.quantity || 1} unit{(m.item?.quantity || 1) > 1 ? 's' : ''}</small></div>
               </div>
               <strong>{m.best?.true_total ? `₹${Number(m.best.true_total).toLocaleString()}` : 'Unavailable'}</strong>
               <span>{m.item?.target_price ? `₹${Number(m.item.target_price).toLocaleString()}` : '—'}</span>
               <span className={`status ${m.status === 'TARGET_REACHED' ? 'green' : 'purple'}`}>{m.status === 'TARGET_REACHED' ? 'TARGET REACHED' : 'MONITORING'}</span>
               <span className="next"><Clock3 size={13} />{m.next_check ? new Date(m.next_check).toLocaleString() : 'scheduled'}</span>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0, justifyContent: 'flex-end' }}>
                 <button className="icon-action" title="Check Live Price" onClick={() => onCheck(m.id)}><Zap size={14} /></button>
                 <button className="icon-action" title="Decision Lab" onClick={() => m.item?.product_id && openDecisionLab(m.item.product_id)}><Sparkles size={14} /></button>
                 <button className="icon-action" title="Delete Monitor" onClick={() => m.item?.id && onDelete(m.item.id)} style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
@@ -1476,7 +1491,7 @@ function Deals({ deals, openDecisionLab, buy }: any) {
           <div className="deal-card" key={d.product_id}>
             <div className={`decision ${d.decision === 'BUY' ? 'buy' : d.decision === "DON'T BUY" ? 'dont' : 'wait'}`}>{d.decision}</div>
             <div className="deal-top"><span className="deal-icon"><TrendingDown size={18} /></span><span className="verified">VERIFIED DATA</span></div>
-            <h3>{d.product}</h3>
+            <h3 title={d.product}>{cleanProductName(d.product, 55)}</h3>
             <strong>₹{Number(d.price).toLocaleString()}</strong>
             <div className="deal-stat"><span>{d.discount_percent}% below observed average</span></div>
             <p>{d.reason}</p>
@@ -1502,7 +1517,7 @@ function Orders({ orders, onViewReceipt }: any) {
             <div className="monitor-product">
               <div className="product-thumb">{o.product_name.slice(0, 2).toUpperCase()}</div>
               <div>
-                <b>{o.product_name}</b>
+                <b title={o.product_name}>{cleanProductName(o.product_name, 50)}</b>
                 <small>{new Date(o.created_at).toLocaleString()}</small>
                 {o.is_gift && (
                   <span className="status orange" style={{ fontSize: 10, padding: '1px 5px', display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
@@ -1682,7 +1697,7 @@ function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing }:
       <button className="back-btn" onClick={back}>← Back to To-Buy</button>
       {data ? (
         <>
-          <PageTitle eyebrow="TRUE PRICE ENGINE" title={data.product} meta={<span className={`decision ${data.decision?.decision === 'BUY' ? 'buy' : 'wait'}`}>{data.decision?.decision}</span>} />
+          <PageTitle eyebrow="TRUE PRICE ENGINE" title={cleanProductName(data.product, 65)} meta={<span className={`decision ${data.decision?.decision === 'BUY' ? 'buy' : 'wait'}`}>{data.decision?.decision}</span>} />
           <div className="decision-banner">
             <div><b>{data.decision?.decision}</b><span>{data.decision?.reason}</span></div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -2204,7 +2219,7 @@ function ProductRow({ item, compare, openDecisionLab, buy, monitor, onVote }: an
       <div className="product-thumb large">{item.name.slice(0, 2).toUpperCase()}</div>
       <div className="product-main">
         <div className="product-title">
-          <b>{item.name}</b>
+          <b title={item.name}>{cleanProductName(item.name, 60)}</b>
           <span className={`status ${item.mode === 'MONITOR' ? 'purple' : 'blue'}`}>{item.mode === 'MONITOR' ? 'MONITOR' : 'BUY NOW'}</span>
           {item.is_gift && (
             <span className="status orange" style={{ background: '#7c2d12', color: '#fed7aa', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
