@@ -336,6 +336,8 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
   return best_match
 
  category = classify_product_category(clean)
+ if is_laptop_product(clean):
+  category = 'LAPTOP'
  est_price = default_price if (default_price and default_price > 0) else estimate_item_market_price(clean, category)
 
  # Extract clean, concise brand name using comprehensive brand map
@@ -353,10 +355,16 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
  if not clean_brand:
   clean_brand = clean.split()[0].capitalize()[:40] if clean and not clean.startswith('http') else 'Genuine Brand'
 
+ clean_model = clean[:100]
+ if is_laptop_product(clean):
+  lb, ls, lc, lm, lq = parse_laptop_identity(clean)
+  clean_brand = lb
+  clean_model = f"{ls} ({lc})"[:100] if lc else ls[:100]
+
  prod = Product(
   name=clean[:400],
   brand=clean_brand[:80],
-  model=clean[:100],
+  model=clean_model[:100],
   category=category[:80],
   specs=f"Category: {category}"
  )
@@ -749,6 +757,34 @@ def batch_process(p:BatchIn,u=Depends(current_user),db:Session=Depends(get_db)):
 
 @app.post('/api/products/url-analyze')
 def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db)):
+ # Fast Cache: Check if this URL was recently observed (< 2 hours) to survive refresh/re-submit instantly
+ clean_u = p.url.split('?')[0].rstrip('/') if '?' in p.url else p.url.rstrip('/')
+ existing_l = db.query(StoreListing).filter(
+  (StoreListing.url == p.url) | (StoreListing.url.startswith(clean_u))
+ ).order_by(StoreListing.observed_at.desc()).first()
+
+ if existing_l and existing_l.price > 0 and existing_l.observed_at and (datetime.now(timezone.utc) - (existing_l.observed_at.replace(tzinfo=timezone.utc) if existing_l.observed_at.tzinfo is None else existing_l.observed_at) < timedelta(hours=2)):
+  product = db.get(Product, existing_l.product_id)
+  if product:
+   sl=user_list(db,u)
+   item = db.query(ShoppingItem).filter_by(list_id=sl.id, product_id=product.id).first()
+   target_p = p.target_price
+   if p.monitor and (target_p is None or target_p <= 0) and existing_l.price > 0:
+    target_p = round(existing_l.price * 0.95, -1) if existing_l.price > 100 else round(existing_l.price * 0.95, 2)
+   if not item:
+    item = ShoppingItem(list_id=sl.id, name=product.name[:500], quantity=1, target_price=target_p, max_price=p.max_price, mode='MONITOR' if p.monitor else 'BUY_NOW', purchase_mode=p.purchase_mode, product_id=product.id)
+    db.add(item); db.flush()
+   elif p.monitor:
+    item.mode = 'MONITOR'
+    if target_p: item.target_price = target_p
+   if p.monitor:
+    t = db.query(MonitoringTask).filter_by(item_id=item.id).first()
+    if not t:
+     t = MonitoringTask(item_id=item.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc)+timedelta(minutes=360))
+     db.add(t)
+   db.commit()
+   return {'item_id':item.id,'product':{'id':product.id,'name':product.name,'brand':product.brand,'model':product.model,'variant':product.variant,'gtin':product.gtin},'source':{'url':p.url,'price':existing_l.price,'true_total':existing_l.price},'comparison':product_summary(db,product.id),'monitoring':p.monitor}
+
  try:
   validate_public_url(p.url)
   source=connector_for(p.url).observe_url(p.url)
@@ -817,17 +853,29 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
    ))
 
  if source.price > 0:
-  sync_product_store_prices(db, product, source.price, product.category or 'ELECTRONICS', product.name, pincode)
+  cat = 'LAPTOP' if is_laptop_product(product.name) else (product.category or 'ELECTRONICS')
+  sync_product_store_prices(db, product, source.price, cat, product.name, pincode)
 
  sl=user_list(db,u)
  target_p = p.target_price
  if p.monitor and (target_p is None or target_p <= 0) and source.price > 0:
   target_p = round(source.price * 0.95, -1) if source.price > 100 else round(source.price * 0.95, 2)
- item=ShoppingItem(list_id=sl.id,name=product.name[:500],quantity=1,target_price=target_p,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)
- db.add(item);db.flush()
+ item=db.query(ShoppingItem).filter_by(list_id=sl.id, product_id=product.id).first()
+ if not item:
+  item=ShoppingItem(list_id=sl.id,name=product.name[:500],quantity=1,target_price=target_p,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)
+  db.add(item);db.flush()
+ elif p.monitor:
+  item.mode='MONITOR'
+  if target_p:item.target_price=target_p
 
  if p.monitor:
-  t=MonitoringTask(item_id=item.id,status='WATCHING',last_checked=datetime.now(timezone.utc),next_check=datetime.now(timezone.utc)+timedelta(minutes=360));db.add(t)
+  t=db.query(MonitoringTask).filter_by(item_id=item.id).first()
+  if not t:
+   t=MonitoringTask(item_id=item.id,status='WATCHING',last_checked=datetime.now(timezone.utc),next_check=datetime.now(timezone.utc)+timedelta(minutes=360));db.add(t)
+  else:
+   t.status='WATCHING'
+   t.last_checked=datetime.now(timezone.utc)
+   t.next_check=datetime.now(timezone.utc)+timedelta(minutes=360)
  log(db,u,'Products',f'Analyzed product URL and verified pricing: {p.url}')
  db.commit()
  return {'item_id':item.id,'product':{'id':product.id,'name':product.name,'brand':product.brand,'model':product.model,'variant':product.variant,'gtin':product.gtin},'source':{'url':p.url,'price':listing.price,'true_total':true_total(listing.price,listing.delivery,listing.tax,listing.fees,listing.coupon,listing.cashback)},'comparison':product_summary(db,product.id),'monitoring':p.monitor}

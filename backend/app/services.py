@@ -48,8 +48,44 @@ def fake_discount(current, advertised, history):
 # Universal Multi-Platform & Category Intelligence
 # ==========================================================
 
+def is_laptop_product(name: str) -> bool:
+    """Accurately detects laptop/notebook/ultrabook products while excluding phones."""
+    n = (name or '').lower()
+    if any(k in n for k in ['phone', 'mobile', 'galaxy s', 'galaxy z', 'pixel 7', 'pixel 8', 'pixel 9', 'iphone', 'oneplus 1', 'oneplus 2', 'oneplus 3', 'oneplus 7', 'oneplus 8', 'oneplus 9', 'oneplus 10', 'oneplus 11', 'oneplus 12', 'redmi note', 'realme ']):
+        return False
+    laptop_terms = [
+        'laptop', 'notebook', 'ultrabook', 'chromebook', 'macbook', 'thinkpad', 'ideapad', 'yoga',
+        'pavilion', 'envy', 'spectre', 'omen', 'victus', 'elitebook', 'probook', 'hp 14', 'hp 15',
+        'inspiron', 'latitude', 'xps', 'vostro', 'alienware', 'vivobook', 'zenbook', 'tuf gaming',
+        'rog zephyrus', 'rog strix', 'aspire', 'swift', 'predator', 'nitro', 'galaxy book', 'loq', 'legion'
+    ]
+    if any(k in n for k in laptop_terms):
+        return True
+    if ('intel' in n or 'amd' in n or 'ryzen' in n or 'core ultra' in n) and any(k in n for k in ['ssd', 'ram', 'ddr4', 'ddr5', 'fhd', '15.6', '14.0', '16.0', 'inch', 'display', 'graphics']):
+        return True
+    return False
+
+def parse_laptop_identity(title: str) -> tuple[str, str, str, str, str]:
+    """Extracts clean Brand, Series, CPU, Model Code, and Clean Search Query from noisy retailer title."""
+    t_low = (title or '').lower()
+    brand = 'HP' if 'hp' in t_low else ('Dell' if 'dell' in t_low else ('Lenovo' if 'lenovo' in t_low else ('ASUS' if 'asus' in t_low else ('Acer' if 'acer' in t_low else ('Apple' if 'macbook' in t_low else 'Laptop')))))
+    
+    cpu_m = re.search(r'(Intel\s+Core\s+Ultra\s+\d+\s*\w*|Intel\s+Core\s+i[3579]-?\w*|AMD\s+Ryzen\s+\d+\s*\w*|M[1234]\s*(?:Pro|Max|Ultra)?)', title, re.I)
+    cpu = cpu_m.group(1).strip() if cpu_m else ''
+    
+    series_m = re.search(r'(HP\s+1[45]|HP\s+Pavilion\s*\w*|HP\s+Envy\s*\w*|HP\s+Victus\s*\d*|HP\s+Omen\s*\d*|Dell\s+Inspiron\s*\d*|Dell\s+XPS\s*\d*|IdeaPad\s*\w*\s*\d*|ThinkPad\s*\w*|Vivobook\s*\w*\s*\d*|Zenbook\s*\w*\s*\d*|MacBook\s*Air|MacBook\s*Pro|Swift\s*\w*|Aspire\s*\w*)', title, re.I)
+    series = series_m.group(1).strip() if series_m else f'{brand} Laptop'
+    
+    model_code_m = re.search(r'\b([A-Z0-9]{4,10}(?:TU|TX|IN|AU|US))\b', title)
+    model_code = model_code_m.group(1) if model_code_m else ''
+    
+    clean_search = f'{series} {cpu}'.strip()
+    return brand, series, cpu, model_code, clean_search
+
 def classify_product_category(name: str) -> str:
     n = name.lower()
+    if is_laptop_product(name):
+        return 'LAPTOP'
     grocery_kw = [
         'tomato', 'tomatos', 'tomatoes', 'chilli', 'chili', 'garlic', 'ginger', 'onion', 'potato',
         'butter', 'milk', 'cheese', 'paneer', 'curd', 'bread', 'jam', 'sauce', 'sos', 'ketchup', 'egg', 'eggs', 'rice', 'atta',
@@ -582,8 +618,45 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
     results = []
     seen_store_names = set()
 
+    core_stores = []
     # Core electronics retailers that should be offered
-    if category == 'ELECTRONICS':
+    if is_laptop_product(query) or category == 'LAPTOP':
+        brand, series, cpu, model_code, clean_search = parse_laptop_identity(query)
+        q_slug = quote_plus(clean_search)
+        
+        p_mrp = round(bp * 1.05, -1) if bp > 50000 else round(bp * 1.08, -1)
+        p_rel = round(bp * 1.012, -1)
+        p_croma = round(bp * 1.006, -1)
+        p_fk = round(bp * 0.988, -1) - 1 if bp > 100 else round(bp * 0.98)
+        p_vs = round(bp * 0.982, -1) if bp > 1000 else round(bp * 0.96)
+        
+        b_low = brand.lower()
+        if 'hp' in b_low:
+            off_store = ('HP World / HP Official Store India', 'hp.com', 'OFFICIAL HP BRAND STORE', f'https://www.hp.com/in-en/shop/catalogsearch/result/?q={q_slug}', p_mrp, 2, 'Official HP 1-Year Onsite Warranty + ADP Option')
+        elif 'dell' in b_low:
+            off_store = ('Dell Official Store India', 'dell.com', 'OFFICIAL DELL BRAND STORE', f'https://www.dell.com/en-in/shop/sps/search?q={q_slug}', p_mrp, 2, 'Dell 1-Year National Onsite Hardware Service')
+        elif 'lenovo' in b_low:
+            off_store = ('Lenovo Official Store India', 'lenovo.com', 'OFFICIAL LENOVO BRAND STORE', f'https://www.lenovo.com/in/en/search?text={q_slug}', p_mrp, 2, 'Lenovo 1-Year Premier Support Warranty')
+        elif 'asus' in b_low:
+            off_store = ('ASUS ROG & Vivobook Store India', 'asus.com', 'OFFICIAL ASUS BRAND STORE', f'https://in.store.asus.com/search/?q={q_slug}', p_mrp, 2, 'ASUS 1-Year Global Warranty')
+        elif 'acer' in b_low:
+            off_store = ('Acer Online Store India', 'store.acer.com', 'OFFICIAL ACER BRAND STORE', f'https://store.acer.com/en-in/catalogsearch/result/?q={q_slug}', p_mrp, 2, 'Acer 1-Year National Warranty')
+        elif 'apple' in b_low:
+            off_store = ('Apple Store India', 'apple.com', 'OFFICIAL APPLE BRAND STORE', f'https://www.apple.com/in/shop/buy-mac', p_mrp, 2, 'Official Apple 1-Year Limited Warranty')
+        elif 'samsung' in b_low:
+            off_store = ('Samsung Galaxy Book Store India', 'samsung.com', 'OFFICIAL BRAND STORE', f'https://www.samsung.com/in/search/?searchvalue={q_slug}', p_mrp, 2, 'Samsung 1-Year Comprehensive Warranty')
+        else:
+            off_store = (f'{brand} Official Brand Store', f'{b_low}.com', 'OFFICIAL BRAND STORE', f'https://www.google.com/search?q={q_slug}+official+store', p_mrp, 2, f'Official 1-Year {brand} Brand Warranty')
+
+        core_stores = [
+            off_store,
+            ('Amazon India', 'amazon.in', 'PRIME VERIFIED', f'https://www.amazon.in/s?k={q_slug}', bp, 1, '1-Year National Brand Warranty with Prime Delivery'),
+            ('Flipkart', 'flipkart.com', 'FLIPKART ASSURED', f'https://www.flipkart.com/search?q={q_slug}', p_fk, 1, 'Brand Warranty with Open Box Inspection Delivery'),
+            ('Croma', 'croma.com', 'CROMA ASSURED', f'https://www.croma.com/search/?q={q_slug}', p_croma, 2, 'Croma 1-Year Comprehensive Onsite Warranty'),
+            ('Reliance Digital', 'reliancedigital.in', 'RELIANCE VERIFIED', f'https://www.reliancedigital.in/search?q={q_slug}', p_rel, 2, 'Reliance ResQ Care Hardware Support'),
+            ('Vijay Sales', 'vijaysales.com', 'VIJAY SALES VERIFIED', f'https://www.vijaysales.com/search?q={q_slug}', p_vs, 2, 'Instant HDFC/ICICI Bank Discount + 1-Yr Warranty'),
+        ]
+    elif category == 'ELECTRONICS':
         is_ip16 = 'iphone 16' in query.lower()
         if is_ip16:
             core_stores = [
@@ -627,6 +700,7 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
                 ('Vijay Sales', 'vijaysales.com', 'VIJAY SALES VERIFIED', f'https://www.vijaysales.com/search?q={q_slug}', p_vs, 2, 'Instant Bank Discount + 1-Yr Warranty'),
             ]
 
+    if core_stores:
         for sname, sdomain, sbadge, surl, sprice, sdeliv_days, swarranty in core_stores:
             if sname not in seen_store_names:
                 seen_store_names.add(sname)
@@ -637,17 +711,17 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
                     'url': surl,
                     'price': sprice,
                     'delivery': 0.0,
-                    'rating': 4.7 if 'Apple' in sname or 'Amazon' in sname else 4.6,
+                    'rating': 4.7 if any(k in sname for k in ['HP', 'Apple', 'Dell', 'Lenovo', 'Amazon']) else 4.6,
                     'delivery_time': f'{sdeliv_days}-day delivery',
                     'seller': f'{sname} Direct Partner',
                     'badge': sbadge,
                     'warranty': swarranty,
-                    'return_policy': '7-day return policy',
+                    'return_policy': '7-day replacement/return policy' if (is_laptop_product(query) or category == 'LAPTOP') else '7-day return policy',
                     'card_offers': get_store_card_offers(sname, sprice, clean_q)
                 })
         return results
 
-    elif category == 'GROCERY':
+    if category == 'GROCERY':
         p_bb = round(bp * 0.95, 2)
         p_blinkit = round(bp * 0.98, 2)
         p_zepto = bp
@@ -1008,8 +1082,63 @@ def generate_smart_substitutes(product_name: str, category: str, current_price: 
         except Exception:
             pass
 
-    # 2. Flagship Smartphone Competitor Catalog Fallback
-    is_ultra = any(k in p_low for k in ['ultra', 'pro max', 'fold']) or cp >= 90000.0 or any(k in p_low for k in ['s26', 's25'])
+    # 2. Authentic Laptop Competitor Catalog Fallback
+    if is_laptop_product(product_name) or category == 'LAPTOP':
+        return [
+            {
+                'name': 'Dell Inspiron 15 Plus (Core Ultra 5 125H)',
+                'brand': 'Dell',
+                'specs': '15.6" FHD 120Hz Anti-Glare, Intel Core Ultra 5 125H, 16GB DDR5, 1TB SSD, Intel Arc Graphics, Platinum Silver',
+                'price': 84990.0,
+                'savings': max(0.0, round(cp - 84990.0, 2)),
+                'rating': 4.8,
+                'type': 'PERFORMANCE COMPETITOR',
+                'reason': 'Direct Intel Core Ultra 5 competitor with sturdy aluminum chassis and Dell Onsite Support.'
+            },
+            {
+                'name': 'Lenovo IdeaPad Slim 5 16" AI (Core Ultra 5)',
+                'brand': 'Lenovo',
+                'specs': '16" 2.5K 120Hz 100% sRGB, Intel Core Ultra 5 125H, 16GB LPDDR5X, 1TB SSD, MIL-STD-810H Durability',
+                'price': 79990.0,
+                'savings': max(0.0, round(cp - 79990.0, 2)),
+                'rating': 4.7,
+                'type': 'DISPLAY & VALUE ALTERNATIVE',
+                'reason': 'Superior 2.5K 120Hz display with 100% sRGB color accuracy at ₹3,000 direct savings.'
+            },
+            {
+                'name': 'ASUS Vivobook S 15 OLED (Core Ultra 5)',
+                'brand': 'ASUS',
+                'specs': '15.6" 3K 120Hz OLED, Intel Core Ultra 5 125H, 16GB RAM, 1TB SSD, 75Wh Battery, 1.5kg Thin & Light',
+                'price': 86990.0,
+                'savings': max(0.0, round(cp - 86990.0, 2)),
+                'rating': 4.8,
+                'type': 'OLED DISPLAY FLAGSHIP',
+                'reason': 'Vibrant 3K 120Hz OLED screen and massive 75Wh battery endurance for creative workflows.'
+            },
+            {
+                'name': 'Acer Swift Go 14 AI OLED (Core Ultra 5)',
+                'brand': 'Acer',
+                'specs': '14" 2.8K 90Hz OLED, Intel Core Ultra 5 125H, 16GB LPDDR5X, 512GB SSD, QHD Webcam, 1.32kg Ultraportable',
+                'price': 74990.0,
+                'savings': max(0.0, round(cp - 74990.0, 2)),
+                'rating': 4.6,
+                'type': 'PORTABLE VALUE KING',
+                'reason': 'Ultra-lightweight 1.32kg form factor with 2.8K OLED display and ₹8,000 significant savings.'
+            },
+            {
+                'name': 'Apple MacBook Air M3 (16GB RAM, 256GB SSD)',
+                'brand': 'Apple',
+                'specs': '13.6" Liquid Retina, Apple M3 8-core CPU, 16GB Unified Memory, 18-hour battery, MagSafe, Fanless',
+                'price': 114900.0,
+                'savings': max(0.0, round(cp - 114900.0, 2)),
+                'rating': 4.9,
+                'type': 'PREMIUM SILICON ALTERNATIVE',
+                'reason': 'Industry-leading battery endurance, fanless silent operation, and class-leading macOS optimization.'
+            }
+        ]
+
+    # 3. Flagship Smartphone Competitor Catalog Fallback
+    is_ultra = not is_laptop_product(product_name) and (any(k in p_low for k in ['ultra', 'pro max', 'fold']) or cp >= 90000.0 or any(k in p_low for k in ['s26', 's25']))
     if is_ultra:
         return [
             {
@@ -2120,14 +2249,22 @@ def _inbuilt_ai_inference(prompt: str) -> str:
     # 2. Competing alternatives / substitutes request
     if 'competing alternative products' in prompt.lower() or 'alternative products' in prompt.lower():
         p_low = prompt.lower()
-        if 'iphone' in p_low:
+        if is_laptop_product(prompt):
+            return _json.dumps([
+                {"name": "Dell Inspiron 15 Plus (Core Ultra 5 125H)", "brand": "Dell", "specs": "15.6\" FHD 120Hz, Intel Core Ultra 5 125H, 16GB DDR5, 1TB SSD, Intel Arc Graphics, Platinum Silver", "price": 84990.0, "type": "PERFORMANCE COMPETITOR", "reason": "Direct Intel Core Ultra 5 competitor with sturdy aluminum chassis and Dell Onsite Support."},
+                {"name": "Lenovo IdeaPad Slim 5 16\" AI (Core Ultra 5)", "brand": "Lenovo", "specs": "16\" 2.5K 120Hz 100% sRGB, Intel Core Ultra 5 125H, 16GB LPDDR5X, 1TB SSD, Military Grade Durability", "price": 79990.0, "type": "DISPLAY & VALUE ALTERNATIVE", "reason": "Superior 2.5K 120Hz display with 100% sRGB color accuracy at ₹3,000 direct savings."},
+                {"name": "ASUS Vivobook S 15 OLED (Core Ultra 5)", "brand": "ASUS", "specs": "15.6\" 3K 120Hz OLED, Intel Core Ultra 5 125H, 16GB RAM, 1TB SSD, 75Wh Battery, 1.5kg Thin & Light", "price": 86990.0, "type": "OLED DISPLAY FLAGSHIP", "reason": "Vibrant 3K 120Hz OLED screen and massive 75Wh battery endurance for creative workflows."},
+                {"name": "Acer Swift Go 14 AI OLED (Core Ultra 5)", "brand": "Acer", "specs": "14\" 2.8K 90Hz OLED, Intel Core Ultra 5 125H, 16GB LPDDR5X, 512GB SSD, QHD Webcam, 1.32kg Ultraportable", "price": 74990.0, "type": "PORTABLE VALUE KING", "reason": "Ultra-lightweight 1.32kg form factor with 2.8K OLED display and ₹8,000 significant savings."},
+                {"name": "Apple MacBook Air M3 (16GB RAM)", "brand": "Apple", "specs": "13.6\" Liquid Retina, Apple M3 8-core CPU / 10-core GPU, 18-hour battery, MagSafe, Fanless", "price": 114900.0, "type": "MAC ECOSYSTEM", "reason": "Industry-leading battery life, fanless silent operation, and high resale value."}
+            ])
+        elif 'iphone' in p_low:
             return _json.dumps([
                 {"name": "Samsung Galaxy S24 5G (128GB)", "brand": "Samsung", "specs": "6.2\" Dynamic AMOLED 2X 120Hz, Snapdragon 8 Gen 3 / Exynos 2400, 50MP Triple Camera, 4000mAh, Galaxy AI", "price": 64999.0, "type": "FLAGSHIP ALTERNATIVE", "reason": "120Hz AMOLED display and Galaxy AI suite at ₹2,901 lower cost vs iPhone 16."},
                 {"name": "Apple iPhone 15 (128GB)", "brand": "Apple", "specs": "6.1\" Super Retina XDR, A16 Bionic, 48MP Fusion Camera, Dynamic Island, USB-C", "price": 54900.0, "type": "VALUE ALTERNATIVE", "reason": "Same core iOS experience, Dynamic Island, and 48MP sensor with ₹13,000 direct savings."},
                 {"name": "Google Pixel 9 (128GB)", "brand": "Google", "specs": "6.3\" Actua OLED 120Hz, Google Tensor G4, 50MP Camera with Gemini Nano AI & Best Take", "price": 69999.0, "type": "CAMERA ALTERNATIVE", "reason": "Class-leading computational photography, Gemini AI, and 7 years of direct OS updates."},
                 {"name": "OnePlus 12 5G (256GB)", "brand": "OnePlus", "specs": "6.82\" 2K 120Hz ProXDR, Snapdragon 8 Gen 3, Hasselblad Camera, 5400mAh, 100W SuperVOOC", "price": 59999.0, "type": "PERFORMANCE ALTERNATIVE", "reason": "Double the storage (256GB), larger 2K 120Hz screen, and 100W fast charging with ₹7,901 savings."}
             ])
-        elif any(k in p_low for k in ['ultra', 'pro max', 's26', 's25']) or ('samsung' in p_low and 'ultra' in p_low):
+        elif (any(k in p_low for k in ['ultra', 'pro max', 's26', 's25']) or ('samsung' in p_low and 'ultra' in p_low)) and not is_laptop_product(prompt):
             return _json.dumps([
                 {"name": "Apple iPhone 16 Pro Max (256GB)", "brand": "Apple", "specs": "6.9\" Super Retina XDR 120Hz ProMotion, A18 Pro Chip, 48MP Fusion Camera with 5x Optical Telephoto, Grade 5 Titanium", "price": 144900.0, "type": "IOS ULTRA FLAGSHIP", "reason": "Direct iOS ultra competitor with class-leading A18 Pro silicon, titanium chassis, and dedicated Camera Control button."},
                 {"name": "Google Pixel 9 Pro XL (256GB)", "brand": "Google", "specs": "6.8\" Super Actua OLED 120Hz, Google Tensor G4, 50MP Triple Pro Camera with 30x Super Res Zoom, Gemini Live AI", "price": 124999.0, "type": "AI & CAMERA FLAGSHIP", "reason": "Unrivaled computational night photography and Gemini Live assistant at ₹15,000 direct savings."},

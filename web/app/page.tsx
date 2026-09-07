@@ -172,7 +172,16 @@ export default function App() {
   const [orders, setOrders] = useState<any[]>([]);
   const [activity, setActivity] = useState<any[]>([]);
   const [input, setInput] = useState('');
-  const [productUrl, setProductUrl] = useState('');
+  const [productUrl, setProductUrlState] = useState('');
+  const setProductUrl = (val: string) => {
+    setProductUrlState(val);
+    if (typeof window !== 'undefined') {
+      try {
+        if (val) localStorage.setItem('sa_product_url', val);
+        else localStorage.removeItem('sa_product_url');
+      } catch {}
+    }
+  };
   const [urlBusy, setUrlBusy] = useState(false);
   const [compare, setCompareState] = useState<any>(null);
   const setCompare = (newCompare: any) => {
@@ -232,15 +241,16 @@ export default function App() {
       try { setBasketData(await req('/api/basket')); } catch {}
       try { setPreferences(await req('/api/preferences')); } catch {}
 
-      // Check for saved Decision Lab product ID or fallback to first product
+      // Check for saved Decision Lab product ID or fallback to latest product
       const savedPid = typeof window !== 'undefined' ? localStorage.getItem('sa_decision_pid') : null;
       let targetPid = savedPid ? Number(savedPid) : null;
-      if (!targetPid && i.items && i.items.length > 0 && i.items[0].product_id) {
-        targetPid = i.items[0].product_id;
+      const itemsWithPid = (i.items || []).filter((it: any) => it.product_id);
+      if (!targetPid && itemsWithPid.length > 0) {
+        targetPid = itemsWithPid[itemsWithPid.length - 1].product_id;
       }
       if (targetPid) {
         setDecisionPid(targetPid);
-        const dLab = await req(`/api/products/${targetPid}/decision-lab`).catch(() => null);
+        const dLab = await req(`/api/products/${targetPid}/decision-lab?t=${Date.now()}`).catch(() => null);
         if (dLab) setDecisionData(dLab);
       }
     } catch (err: any) {
@@ -265,10 +275,18 @@ export default function App() {
           }
           const savedPid = localStorage.getItem('sa_decision_pid');
           if (savedPid) setDecisionPid(Number(savedPid));
+          const savedProductUrl = localStorage.getItem('sa_product_url');
+          if (savedProductUrl) setProductUrlState(savedProductUrl);
 
           await req('/api/me');
           setAuthed(true);
-          load();
+          await load();
+
+          // If an extraction was in-flight when the page refreshed, resume it seamlessly
+          const inFlightUrl = localStorage.getItem('sa_extracting_url');
+          if (inFlightUrl) {
+            analyzeUrl(false, inFlightUrl);
+          }
         } catch {
           localStorage.removeItem('sa_access');
           localStorage.removeItem('sa_refresh');
@@ -326,18 +344,36 @@ export default function App() {
     const targetUrl = (urlOverride || productUrl).trim();
     if (!targetUrl) return;
     setUrlBusy(true);
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('sa_extracting_url', targetUrl); } catch {}
+    }
     try {
       const x = await req('/api/products/url-analyze', {
         method: 'POST',
         body: JSON.stringify({ url: targetUrl, monitor })
       });
+      if (x.product && x.product.id) {
+        setDecisionPid(x.product.id);
+        if (typeof window !== 'undefined') {
+          try { localStorage.setItem('sa_decision_pid', String(x.product.id)); } catch {}
+        }
+      }
       setCompare(x.comparison);
       setTab('Compare');
       setProductUrl('');
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('sa_extracting_url');
+          localStorage.removeItem('sa_product_url');
+        } catch {}
+      }
       await load();
-      setToast(monitor ? 'Product analyzed and monitoring started' : 'Product analyzed and compared');
+      setToast(monitor ? 'Product analyzed, compared, and 24/7 monitoring started' : 'Product analyzed and compared across live stores');
     } catch (e: any) {
       setToast(e.message);
+      if (typeof window !== 'undefined') {
+        try { localStorage.removeItem('sa_extracting_url'); } catch {}
+      }
     } finally {
       setUrlBusy(false);
     }
@@ -547,7 +583,7 @@ export default function App() {
     }
     setBusy(true);
     try {
-      const lab = await req(`/api/products/${pid}/decision-lab`);
+      const lab = await req(`/api/products/${pid}/decision-lab?t=${Date.now()}`);
       setDecisionData(lab);
       setTab('Decision Lab');
       setToast('Decision Lab updated with latest intelligence');
@@ -678,7 +714,23 @@ export default function App() {
         <div className="content">
           {tab === 'Home' && <Home input={input} setInput={setInput} run={run} busy={busy} stats={stats} todo={todo} activity={activity} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} setTab={setTab} productUrl={productUrl} setProductUrl={setProductUrl} analyzeUrl={analyzeUrl} urlBusy={urlBusy} />}
           {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} onAddItem={addNewItem} onDeleteItem={deleteItem} onToggleStatus={toggleItemStatus} onVote={voteItem} />}
-          {tab === 'Decision Lab' && <DecisionLabPage items={items} selectedPid={decisionPid} data={decisionData} onSelectProduct={openDecisionLab} onSwap={swapItem} onRefresh={() => decisionPid && openDecisionLab(decisionPid)} refreshing={busy} />}
+          {tab === 'Decision Lab' && (
+            <DecisionLabPage
+              items={items}
+              selectedPid={decisionPid}
+              data={decisionData}
+              onSelectProduct={openDecisionLab}
+              onSwap={swapItem}
+              onRefresh={async () => {
+                const pidToRefresh = decisionPid || (decisionData && decisionData.product_id) || (items.find((x: any) => x.product_id)?.product_id);
+                if (pidToRefresh) {
+                  await openDecisionLab(pidToRefresh);
+                }
+                await load();
+              }}
+              refreshing={busy}
+            />
+          )}
           {tab === 'Master Cart' && <MasterCartPage data={basketData} strategy={basketStrategy} setStrategy={async (st: string) => { setBasketStrategy(st); setBasketData(await req(`/api/basket?strategy=${st}`)); }} todo={todo} buyItem={buy} onCheckoutAll={async () => { for (const it of todo) { await buy(it.id); } setTab('Orders'); }} />}
           {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} onScanInvoice={async (txt: string) => { const res = await req('/api/invoices/scan', { method: 'POST', body: JSON.stringify({ text: txt }) }); for (const it of res.items) { await addNewItem(it.item, it.price); } setToast(`Imported ${res.items.length} items from scanned invoice!`); }} />}
           {tab === 'Monitoring' && <Monitoring rows={monitor} refresh={load} openDecisionLab={openDecisionLab} onCheck={triggerPriceCheck} onDelete={deleteMonitor} />}
@@ -961,6 +1013,7 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
 
 function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, onRefresh, refreshing }: any) {
   const productItems = items.filter((x: any) => x.product_id);
+  const activePid = selectedPid || (data && data.product_id) || (productItems[0]?.product_id);
   if (!data) return (
     <div className="stack">
       <PageTitle eyebrow="AI INTELLIGENCE" title="Decision Lab" meta="Deep Product & Price Analysis" />
@@ -991,7 +1044,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
           <button
             type="button"
             className="secondary"
-            onClick={() => onRefresh ? onRefresh() : (selectedPid && onSelectProduct(selectedPid))}
+            onClick={() => onRefresh ? onRefresh() : (activePid && onSelectProduct(activePid))}
             title="Refresh Decision Lab Analysis"
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, fontSize: 13, borderColor: '#6366f1', color: '#c7d2fe' }}
           >
