@@ -5666,7 +5666,7 @@ def deterministic_parse(text):
     purchase = 'AUTO' if ('auto' in low or 'automatically' in low) else 'MONITOR_ONLY' if 'monitor only' in low else 'ASK'
     qmatch = re.search(r'\b(\d+)\s*(?:x|units?|items?)\b', low)
     q = int(qmatch.group(1)) if qmatch else 1
-    cleaned = re.sub(r"\b(find|the|cheapest|price|monitor|buy|automatically|auto-buy|auto|when|it|falls|below|under|and|ask|me|before|buying|don't|purchase|anything|for|rs\.?|inr)\b", ' ', text, flags=re.I)
+    cleaned = re.sub(r"\b(find|the|cheapest|price|monitor|buy|direct|directly|now|order|automatically|auto-buy|auto|when|it|falls|below|under|and|ask|me|before|buying|don't|purchase|anything|for|rs\.?|inr)\b", ' ', text, flags=re.I)
     cleaned = re.sub(r'(â‚¹\s*[\d,]+(?:\.\d+)?)', ' ', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip(' .,-')
     return {'name': cleaned or text, 'quantity': q, 'target_price': prices[0] if prices else None, 'max_price': prices[1] if len(prices) > 1 else None, 'mode': mode, 'purchase_mode': purchase}
