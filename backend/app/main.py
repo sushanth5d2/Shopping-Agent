@@ -208,7 +208,8 @@ def product_summary(db, pid, include_details: bool = True):
    continue
   seen_stores.add(s_canon)
   seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
-  out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price,p.name)})
+  l_coupons = get_verified_store_coupons(s_canon, l.price, p.name)
+  out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price,p.name),'coupons':l_coupons})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
  p_cat = p.category if (p.category and p.category not in ('ELECTRONICS', 'General')) else classify_product_category(p.name)
@@ -216,6 +217,16 @@ def product_summary(db, pid, include_details: bool = True):
   p_cat = 'LAPTOP'
  substitutes = generate_smart_substitutes(p.name, p_cat, best_item['true_total']) if include_details else []
  sustainability = calculate_sustainability_score(p_cat, p.name, best_item.get('store', '')) if include_details else {'eco_grade': 'A', 'badge': '🌱 Verified'}
+ all_coupons = []
+ seen_c = set()
+ for item in out:
+  for cpn in item.get('coupons', []):
+   key = f"{cpn['store']}_{cpn['code']}"
+   if key not in seen_c:
+    seen_c.add(key)
+    all_coupons.append(cpn)
+ all_coupons.sort(key=lambda x: x.get('discount_amount', 0), reverse=True)
+ tradeoffs = compute_store_tradeoffs(out, all_coupons)
  return {
   'product_id':pid,
   'product':p.name,
@@ -226,7 +237,9 @@ def product_summary(db, pid, include_details: bool = True):
   'listings':sorted(out,key=lambda x:x['true_total']),
   'best':best_item,
   'substitutes':substitutes,
-  'sustainability':sustainability
+  'sustainability':sustainability,
+  'coupons':all_coupons,
+  'tradeoffs':tradeoffs
  }
 @app.get('/api/health')
 def health():return {'status':'ok','version':'3.0.0','environment':'production'}
@@ -1048,7 +1061,7 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':f'Estimated {delivery_days}-day delivery','return_satisfaction':returns_policy}
  substitutes = c.get('substitutes', [])
  sustainability = c.get('sustainability', {})
- return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'substitutes':substitutes,'sustainability':sustainability,'price_history':hist,'price_tracker':tracker}
+ return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'substitutes':substitutes,'sustainability':sustainability,'price_history':hist,'price_tracker':tracker,'coupons':c.get('coupons',[]),'tradeoffs':c.get('tradeoffs',{})}
 @app.post('/api/items/{item_id}/monitor')
 def monitor(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()

@@ -8,7 +8,7 @@ import {
   ShoppingCart, AlertTriangle, PlayCircle, Scale, Clock3,
   Check, Menu, X, Plus, Trash2, Bell, Gift, Users, Leaf,
   FileText, RefreshCw, ThumbsUp, ThumbsDown, CreditCard,
-  CheckCircle2, AlertOctagon, LineChart, TrendingUp, Bookmark, PauseCircle
+  CheckCircle2, AlertOctagon, LineChart, TrendingUp, Bookmark, PauseCircle, Copy, Tag
 } from 'lucide-react';
 
 interface Item {
@@ -1417,6 +1417,220 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
         );
       })()}
 
+      {/* 3-Way Trade-off Decision Framework (Fastest vs Cheapest vs Official) */}
+      {data.tradeoffs && (data.tradeoffs.fastest || data.tradeoffs.cheapest || data.tradeoffs.official) && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: 12,
+          marginTop: 8,
+          marginBottom: 10
+        }}>
+          {/* 1. Fastest 10-15 Min Rapid Drop */}
+          {data.tradeoffs.fastest && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(30, 41, 59, 0.7))',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              borderRadius: 12,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 10
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', letterSpacing: '0.05em' }}>
+                    ⚡ FASTEST ARRIVAL
+                  </span>
+                  <span style={{ fontSize: 10, background: '#0284c7', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                    {data.tradeoffs.fastest.delivery_time}
+                  </span>
+                </div>
+                <b style={{ fontSize: 16, color: '#fff', display: 'block' }}>{data.tradeoffs.fastest.store}</b>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4 }}>
+                  {data.tradeoffs.fastest.reason}
+                </p>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <strong style={{ fontSize: 18, color: '#38bdf8' }}>₹{Number(data.tradeoffs.fastest.price).toLocaleString()}</strong>
+                {data.tradeoffs.fastest.url && (
+                  <a href={data.tradeoffs.fastest.url} target="_blank" rel="noreferrer" className="primary" style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span>Get in 10 Mins</span> <ExternalLink size={12} />
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 2. Deepest Coupon Discount */}
+          {data.tradeoffs.cheapest && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(30, 41, 59, 0.7))',
+              border: '1px solid rgba(34, 197, 94, 0.35)',
+              borderRadius: 12,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 10
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#4ade80', letterSpacing: '0.05em' }}>
+                    💰 DEEPEST DISCOUNT
+                  </span>
+                  <span style={{ fontSize: 10, background: '#16a34a', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                    {data.tradeoffs.cheapest.badge}
+                  </span>
+                </div>
+                <b style={{ fontSize: 16, color: '#fff', display: 'block' }}>{data.tradeoffs.cheapest.store}</b>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4 }}>
+                  {data.tradeoffs.cheapest.reason}
+                </p>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <div>
+                  <strong style={{ fontSize: 18, color: '#4ade80' }}>₹{Number(data.tradeoffs.cheapest.effective_price).toLocaleString()}</strong>
+                  {data.tradeoffs.cheapest.savings > 0 && (
+                    <small style={{ display: 'block', fontSize: 11, color: '#94a3b8', textDecoration: 'line-through' }}>
+                      ₹{Number(data.tradeoffs.cheapest.original_price).toLocaleString()}
+                    </small>
+                  )}
+                </div>
+                {data.tradeoffs.cheapest.url && (
+                  <a href={data.tradeoffs.cheapest.url} target="_blank" rel="noreferrer" className="primary" style={{ padding: '6px 14px', fontSize: 12, background: '#16a34a', borderColor: '#15803d', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span>Buy Lowest</span> <ExternalLink size={12} />
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Official Brand Direct */}
+          {data.tradeoffs.official && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.12), rgba(30, 41, 59, 0.7))',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              borderRadius: 12,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 10
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#c084fc', letterSpacing: '0.05em' }}>
+                    🛡️ BRAND DIRECT
+                  </span>
+                  <span style={{ fontSize: 10, background: '#7c3aed', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                    OFFICIAL
+                  </span>
+                </div>
+                <b style={{ fontSize: 16, color: '#fff', display: 'block' }}>{data.tradeoffs.official.store}</b>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4 }}>
+                  {data.tradeoffs.official.reason}
+                </p>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <strong style={{ fontSize: 18, color: '#c084fc' }}>₹{Number(data.tradeoffs.official.price).toLocaleString()}</strong>
+                {data.tradeoffs.official.url && (
+                  <a href={data.tradeoffs.official.url} target="_blank" rel="noreferrer" className="secondary" style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span>Official Store</span> <ExternalLink size={12} />
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Active Verified Coupons & Store Discounts Section */}
+      {data.coupons && data.coupons.length > 0 && (
+        <div style={{
+          background: 'rgba(15, 23, 42, 0.85)',
+          border: '1px solid #334155',
+          borderRadius: 12,
+          padding: '16px 18px',
+          marginTop: 10,
+          marginBottom: 12
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Tag size={16} color="#f59e0b" />
+              <b style={{ fontSize: 14, color: '#f8fafc', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                Active Verified Coupons &amp; Store Discounts ({data.coupons.length})
+              </b>
+            </div>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              Tested &amp; verified for instant savings at checkout
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+            {data.coupons.map((cpn: any, ci: number) => (
+              <div key={ci} style={{
+                background: 'rgba(30, 41, 59, 0.6)',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                borderRadius: 10,
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: 8
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#38bdf8' }}>{cpn.store}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)', borderRadius: 4, padding: '2px 6px' }}>
+                    {cpn.badge}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, lineHeight: 1.4 }}>
+                  {cpn.title}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#94a3b8' }}>
+                  <span>Min Cart: ₹{cpn.min_order?.toLocaleString()}</span>
+                  {cpn.effective_price && (
+                    <span style={{ color: '#4ade80', fontWeight: 700 }}>
+                      Net: ₹{Number(cpn.effective_price).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                  <div style={{
+                    flex: 1,
+                    background: '#0b1329',
+                    border: '1px dashed #64748b',
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: '#fbbf24',
+                    letterSpacing: '0.08em',
+                    textAlign: 'center'
+                  }}>
+                    {cpn.code}
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ padding: '6px 12px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    onClick={() => {
+                      if (typeof navigator !== 'undefined') {
+                        navigator.clipboard.writeText(cpn.code);
+                      }
+                    }}
+                  >
+                    <Copy size={12} />
+                    <span>Copy</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="dashboard-grid">
         <div className="panel">
           <div className="panel-head">
@@ -2459,6 +2673,10 @@ function ActivityPage({ rows }: any) {
 }
 
 function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing }: any) {
+  const [copiedCoupon, setCopiedCoupon] = useState<string | null>(null);
+  const tradeoffs = data?.tradeoffs || {};
+  const coupons = data?.coupons || [];
+
   return (
     <div className="stack">
       <button className="back-btn" onClick={back}>← Back to To-Buy</button>
@@ -2480,6 +2698,225 @@ function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing }:
               <button className="primary" onClick={() => openDecisionLab(data.product_id)}>Open in Decision Lab <Sparkles size={13} /></button>
             </div>
           </div>
+
+          {/* 3-Way Trade-off Decision Framework */}
+          {(tradeoffs.fastest || tradeoffs.cheapest || tradeoffs.official) && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: 12,
+              marginTop: 10,
+              marginBottom: 10
+            }}>
+              {/* 1. Fastest 10-15 Min Rapid Drop */}
+              {tradeoffs.fastest && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(30, 41, 59, 0.7))',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  borderRadius: 12,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: 10
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', letterSpacing: '0.05em' }}>
+                        ⚡ FASTEST ARRIVAL
+                      </span>
+                      <span style={{ fontSize: 10, background: '#0284c7', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                        {tradeoffs.fastest.delivery_time}
+                      </span>
+                    </div>
+                    <b style={{ fontSize: 16, color: '#fff', display: 'block' }}>{tradeoffs.fastest.store}</b>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4 }}>
+                      {tradeoffs.fastest.reason}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <strong style={{ fontSize: 18, color: '#38bdf8' }}>₹{Number(tradeoffs.fastest.price).toLocaleString()}</strong>
+                    {tradeoffs.fastest.url && (
+                      <a href={tradeoffs.fastest.url} target="_blank" rel="noreferrer" className="primary" style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span>Get in 10 Mins</span> <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Deepest Coupon Discount */}
+              {tradeoffs.cheapest && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(30, 41, 59, 0.7))',
+                  border: '1px solid rgba(34, 197, 94, 0.35)',
+                  borderRadius: 12,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: 10
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: '#4ade80', letterSpacing: '0.05em' }}>
+                        💰 DEEPEST DISCOUNT
+                      </span>
+                      <span style={{ fontSize: 10, background: '#16a34a', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                        {tradeoffs.cheapest.badge}
+                      </span>
+                    </div>
+                    <b style={{ fontSize: 16, color: '#fff', display: 'block' }}>{tradeoffs.cheapest.store}</b>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4 }}>
+                      {tradeoffs.cheapest.reason}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div>
+                      <strong style={{ fontSize: 18, color: '#4ade80' }}>₹{Number(tradeoffs.cheapest.effective_price).toLocaleString()}</strong>
+                      {tradeoffs.cheapest.savings > 0 && (
+                        <small style={{ display: 'block', fontSize: 11, color: '#94a3b8', textDecoration: 'line-through' }}>
+                          ₹{Number(tradeoffs.cheapest.original_price).toLocaleString()}
+                        </small>
+                      )}
+                    </div>
+                    {tradeoffs.cheapest.url && (
+                      <a href={tradeoffs.cheapest.url} target="_blank" rel="noreferrer" className="primary" style={{ padding: '6px 14px', fontSize: 12, background: '#16a34a', borderColor: '#15803d', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span>Buy Lowest</span> <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Official Brand Direct */}
+              {tradeoffs.official && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.12), rgba(30, 41, 59, 0.7))',
+                  border: '1px solid rgba(168, 85, 247, 0.35)',
+                  borderRadius: 12,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: 10
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: '#c084fc', letterSpacing: '0.05em' }}>
+                        🛡️ BRAND DIRECT
+                      </span>
+                      <span style={{ fontSize: 10, background: '#7c3aed', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                        OFFICIAL
+                      </span>
+                    </div>
+                    <b style={{ fontSize: 16, color: '#fff', display: 'block' }}>{tradeoffs.official.store}</b>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4 }}>
+                      {tradeoffs.official.reason}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <strong style={{ fontSize: 18, color: '#c084fc' }}>₹{Number(tradeoffs.official.price).toLocaleString()}</strong>
+                    {tradeoffs.official.url && (
+                      <a href={tradeoffs.official.url} target="_blank" rel="noreferrer" className="secondary" style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span>Official Store</span> <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Active Verified Coupons & Store Discounts Section */}
+          {coupons.length > 0 && (
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid #334155',
+              borderRadius: 12,
+              padding: '16px 18px',
+              marginTop: 10,
+              marginBottom: 12
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Tag size={16} color="#f59e0b" />
+                  <b style={{ fontSize: 14, color: '#f8fafc', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                    Active Verified Coupons &amp; Store Discounts ({coupons.length})
+                  </b>
+                </div>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Tested &amp; verified for instant savings at checkout
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+                {coupons.map((cpn: any, ci: number) => {
+                  const isCopied = copiedCoupon === cpn.code;
+                  return (
+                    <div key={ci} style={{
+                      background: 'rgba(30, 41, 59, 0.6)',
+                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                      borderRadius: 10,
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: 8
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#38bdf8' }}>{cpn.store}</span>
+                        <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)', borderRadius: 4, padding: '2px 6px' }}>
+                          {cpn.badge}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, lineHeight: 1.4 }}>
+                        {cpn.title}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#94a3b8' }}>
+                        <span>Min Cart: ₹{cpn.min_order?.toLocaleString()}</span>
+                        {cpn.effective_price && (
+                          <span style={{ color: '#4ade80', fontWeight: 700 }}>
+                            Net: ₹{Number(cpn.effective_price).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                        <div style={{
+                          flex: 1,
+                          background: '#0b1329',
+                          border: '1px dashed #64748b',
+                          borderRadius: 6,
+                          padding: '6px 10px',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#fbbf24',
+                          letterSpacing: '0.08em',
+                          textAlign: 'center'
+                        }}>
+                          {cpn.code}
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ padding: '6px 12px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4, borderColor: isCopied ? '#22c55e' : '#64748b', color: isCopied ? '#22c55e' : '#cbd5e1' }}
+                          onClick={() => {
+                            if (typeof navigator !== 'undefined') {
+                              navigator.clipboard.writeText(cpn.code);
+                              setCopiedCoupon(cpn.code);
+                              setTimeout(() => setCopiedCoupon(null), 2000);
+                            }
+                          }}
+                        >
+                          {isCopied ? <Check size={12} /> : <Copy size={12} />}
+                          <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Autonomous Browser Agent Live Workstation Status */}
           <div style={{
