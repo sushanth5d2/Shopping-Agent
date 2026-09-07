@@ -103,6 +103,15 @@ class BrowserAgent:
 
             page = context.new_page()
 
+            # Accelerate page load by blocking heavy media and font downloads
+            try:
+                page.route(
+                    re.compile(r'\.(png|jpe?g|gif|webp|svg|woff2?|ttf|eot|mp4|webm)(\?.*)?$', re.I),
+                    lambda route: route.abort()
+                )
+            except Exception:
+                pass
+
             # Clean tracking parameters from URL
             clean_url = re.sub(r'([?&])ref=[^&]*', '', url).rstrip('?&')
             asin_m = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', url) or re.search(r'\b(B0[A-Z0-9]{8})\b', url)
@@ -112,14 +121,14 @@ class BrowserAgent:
             # STEP 1: Navigate to Product Page
             self._notify(task_id, 'NAVIGATING', f'Agent navigating to {urllib.parse.urlparse(url).netloc}...')
             try:
-                page.goto(clean_url, wait_until='domcontentloaded', timeout=20000)
-                page.wait_for_timeout(1000)
+                page.goto(clean_url, wait_until='domcontentloaded', timeout=14000)
+                page.wait_for_timeout(300)
             except Exception:
                 # If direct clean URL failed, retry with canonical ASIN URL
                 if asin and 'amazon' in url.lower():
                     canonical_asin_url = f"https://www.amazon.in/dp/{asin}"
-                    page.goto(canonical_asin_url, wait_until='domcontentloaded', timeout=15000)
-                    page.wait_for_timeout(800)
+                    page.goto(canonical_asin_url, wait_until='domcontentloaded', timeout=9000)
+                    page.wait_for_timeout(250)
 
             # STEP 2: Extract Live Identity & Price
             self._notify(task_id, 'INSPECTING_DOM', 'Analyzing live DOM for product identity, specs, and price...')
@@ -215,13 +224,13 @@ class BrowserAgent:
             # Check if reviews exist on the product page
             review_cards = soup.select('div[data-hook="review"]')
             if len(review_cards) < 3 and asin and 'amazon' in url.lower():
-                # Navigate to dedicated review page
+                # Navigate to dedicated review page with fast timeout
                 reviews_url = f"https://www.amazon.in/product-reviews/{asin}/ref=cm_cr_dp_d_show_all_btm?reviewerType=all_reviews"
                 try:
-                    page.goto(reviews_url, wait_until='domcontentloaded', timeout=12000)
-                    page.wait_for_timeout(800)
+                    page.goto(reviews_url, wait_until='domcontentloaded', timeout=5000)
+                    page.wait_for_timeout(200)
                     soup_reviews = BeautifulSoup(page.content(), 'html.parser')
-                    review_cards = soup_reviews.select('div[data-hook="review"]')
+                    review_cards = soup_reviews.select('div[data-hook="review"]') or review_cards
                 except Exception:
                     pass
 
@@ -272,8 +281,8 @@ class BrowserAgent:
             ]
             for store_name, domain, search_url, price_selector in competitors_to_check:
                 try:
-                    page.goto(search_url, wait_until='domcontentloaded', timeout=4000)
-                    page.wait_for_timeout(300)
+                    page.goto(search_url, wait_until='domcontentloaded', timeout=1800)
+                    page.wait_for_timeout(100)
                     s_soup = BeautifulSoup(page.content(), 'html.parser')
                     s_price_el = s_soup.select_one(price_selector)
                     if s_price_el:

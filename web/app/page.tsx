@@ -141,7 +141,14 @@ export default function App() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [tab, setTab] = useState('Home');
+  const [tab, setTabState] = useState('Home');
+  const setTab = (newTab: string) => {
+    setTabState(newTab);
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('sa_active_tab', newTab); } catch {}
+    }
+  };
+
   const [mobileOpen, setMobileOpen] = useState(false);
   const [data, setData] = useState<any>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -152,7 +159,20 @@ export default function App() {
   const [input, setInput] = useState('');
   const [productUrl, setProductUrl] = useState('');
   const [urlBusy, setUrlBusy] = useState(false);
-  const [compare, setCompare] = useState<any>(null);
+  const [compare, setCompareState] = useState<any>(null);
+  const setCompare = (newCompare: any) => {
+    setCompareState(newCompare);
+    if (typeof window !== 'undefined') {
+      try {
+        if (newCompare) {
+          localStorage.setItem('sa_active_compare', JSON.stringify(newCompare));
+        } else {
+          localStorage.removeItem('sa_active_compare');
+        }
+      } catch {}
+    }
+  };
+
   const [decisionData, setDecisionData] = useState<any>(null);
   const [decisionPid, setDecisionPid] = useState<number | null>(null);
   const [basketData, setBasketData] = useState<any>(null);
@@ -197,9 +217,15 @@ export default function App() {
       try { setBasketData(await req('/api/basket')); } catch {}
       try { setPreferences(await req('/api/preferences')); } catch {}
 
-      if (i.items && i.items.length > 0 && i.items[0].product_id) {
-        setDecisionPid(i.items[0].product_id);
-        const dLab = await req(`/api/products/${i.items[0].product_id}/decision-lab`).catch(() => null);
+      // Check for saved Decision Lab product ID or fallback to first product
+      const savedPid = typeof window !== 'undefined' ? localStorage.getItem('sa_decision_pid') : null;
+      let targetPid = savedPid ? Number(savedPid) : null;
+      if (!targetPid && i.items && i.items.length > 0 && i.items[0].product_id) {
+        targetPid = i.items[0].product_id;
+      }
+      if (targetPid) {
+        setDecisionPid(targetPid);
+        const dLab = await req(`/api/products/${targetPid}/decision-lab`).catch(() => null);
         if (dLab) setDecisionData(dLab);
       }
     } catch (err: any) {
@@ -215,6 +241,16 @@ export default function App() {
     const initAuth = async () => {
       if (typeof window !== 'undefined' && localStorage.getItem('sa_access')) {
         try {
+          // Restore persisted tab, compare product, and decision lab ID across refresh
+          const savedTab = localStorage.getItem('sa_active_tab');
+          if (savedTab) setTabState(savedTab);
+          const savedCompare = localStorage.getItem('sa_active_compare');
+          if (savedCompare) {
+            try { setCompareState(JSON.parse(savedCompare)); } catch {}
+          }
+          const savedPid = localStorage.getItem('sa_decision_pid');
+          if (savedPid) setDecisionPid(Number(savedPid));
+
           await req('/api/me');
           setAuthed(true);
           load();
@@ -491,12 +527,19 @@ export default function App() {
 
   const openDecisionLab = async (pid: number) => {
     setDecisionPid(pid);
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('sa_decision_pid', String(pid)); } catch {}
+    }
+    setBusy(true);
     try {
       const lab = await req(`/api/products/${pid}/decision-lab`);
       setDecisionData(lab);
       setTab('Decision Lab');
+      setToast('Decision Lab updated with latest intelligence');
     } catch (e: any) {
       setToast(e.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -534,6 +577,9 @@ export default function App() {
   const signout = () => {
     localStorage.removeItem('sa_access');
     localStorage.removeItem('sa_refresh');
+    localStorage.removeItem('sa_active_tab');
+    localStorage.removeItem('sa_active_compare');
+    localStorage.removeItem('sa_decision_pid');
     setAuthed(false);
     setTab('Home');
   };
@@ -617,7 +663,7 @@ export default function App() {
         <div className="content">
           {tab === 'Home' && <Home input={input} setInput={setInput} run={run} busy={busy} stats={stats} todo={todo} activity={activity} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} setTab={setTab} productUrl={productUrl} setProductUrl={setProductUrl} analyzeUrl={analyzeUrl} urlBusy={urlBusy} />}
           {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} onAddItem={addNewItem} onDeleteItem={deleteItem} onToggleStatus={toggleItemStatus} onVote={voteItem} />}
-          {tab === 'Decision Lab' && <DecisionLabPage items={items} selectedPid={decisionPid} data={decisionData} onSelectProduct={openDecisionLab} onSwap={swapItem} />}
+          {tab === 'Decision Lab' && <DecisionLabPage items={items} selectedPid={decisionPid} data={decisionData} onSelectProduct={openDecisionLab} onSwap={swapItem} onRefresh={() => decisionPid && openDecisionLab(decisionPid)} refreshing={busy} />}
           {tab === 'Master Cart' && <MasterCartPage data={basketData} strategy={basketStrategy} setStrategy={async (st: string) => { setBasketStrategy(st); setBasketData(await req(`/api/basket?strategy=${st}`)); }} todo={todo} buyItem={buy} onCheckoutAll={async () => { for (const it of todo) { await buy(it.id); } setTab('Orders'); }} />}
           {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} onScanInvoice={async (txt: string) => { const res = await req('/api/invoices/scan', { method: 'POST', body: JSON.stringify({ text: txt }) }); for (const it of res.items) { await addNewItem(it.item, it.price); } setToast(`Imported ${res.items.length} items from scanned invoice!`); }} />}
           {tab === 'Monitoring' && <Monitoring rows={monitor} refresh={load} openDecisionLab={openDecisionLab} onCheck={triggerPriceCheck} onDelete={deleteMonitor} />}
@@ -625,7 +671,7 @@ export default function App() {
           {tab === 'Orders' && <Orders orders={orders} onViewReceipt={viewOrderReceipt} />}
           {tab === 'Savings' && <Savings data={data} orders={orders} />}
           {tab === 'Agent Activity' && <ActivityPage rows={activity} />}
-          {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} onSwap={swapItem} />}
+          {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} onSwap={swapItem} onRefresh={() => compare?.product_id && compareItem({ product_id: compare.product_id } as any)} refreshing={busy} />}
           {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} preferences={preferences} savePreferences={savePreferences} busy={busy} signout={signout} />}
         </div>
       </main>
@@ -898,7 +944,7 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
   );
 }
 
-function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: any) {
+function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, onRefresh, refreshing }: any) {
   const productItems = items.filter((x: any) => x.product_id);
   if (!data) return (
     <div className="stack">
@@ -926,13 +972,25 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
           <span className="eyebrow">INTELLIGENCE LABORATORY</span>
           <h2>Decision Lab: {data.product}</h2>
         </div>
-        {productItems.length > 1 && (
-          <select className="batch-target" value={selectedPid || ''} onChange={e => onSelectProduct(Number(e.target.value))}>
-            {productItems.map((p: any) => (
-              <option key={p.id} value={p.product_id}>{p.name}</option>
-            ))}
-          </select>
-        )}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onRefresh ? onRefresh() : (selectedPid && onSelectProduct(selectedPid))}
+            title="Refresh Decision Lab Analysis"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, fontSize: 13, borderColor: '#6366f1', color: '#c7d2fe' }}
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            <span>Refresh Lab</span>
+          </button>
+          {productItems.length > 1 && (
+            <select className="batch-target" value={selectedPid || ''} onChange={e => onSelectProduct(Number(e.target.value))}>
+              {productItems.map((p: any) => (
+                <option key={p.id} value={p.product_id}>{p.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       <div className="dashboard-grid">
@@ -1200,7 +1258,14 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap }: 
               <span className="eyebrow" style={{ color: '#818cf8' }}>SMART ALTERNATIVES & DISCOVERY</span>
               <h3>Verified Brand Substitutes</h3>
             </div>
-            <RefreshCw size={18} color="#818cf8" />
+            <button
+              type="button"
+              onClick={() => onRefresh ? onRefresh() : (selectedPid && onSelectProduct(selectedPid))}
+              title="Refresh Brand Substitutes & Recommendations"
+              style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid #6366f1', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 8, color: '#a5b4fc', transition: 'all 0.2s' }}
+            >
+              <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+            </button>
           </div>
           <p style={{ fontSize: 13, color: '#cbd5e1', margin: '4px 0 14px' }}>
             AI-discovered alternatives with identical active specifications or greater price-to-performance value:
@@ -1602,7 +1667,7 @@ function ActivityPage({ rows }: any) {
   );
 }
 
-function Compare({ data, back, openDecisionLab, onSwap }: any) {
+function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing }: any) {
   return (
     <div className="stack">
       <button className="back-btn" onClick={back}>← Back to To-Buy</button>
@@ -1611,7 +1676,18 @@ function Compare({ data, back, openDecisionLab, onSwap }: any) {
           <PageTitle eyebrow="TRUE PRICE ENGINE" title={data.product} meta={<span className={`decision ${data.decision?.decision === 'BUY' ? 'buy' : 'wait'}`}>{data.decision?.decision}</span>} />
           <div className="decision-banner">
             <div><b>{data.decision?.decision}</b><span>{data.decision?.reason}</span></div>
-            <button className="primary" onClick={() => openDecisionLab(data.product_id)}>Open in Decision Lab <Sparkles size={13} /></button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => onRefresh && onRefresh()}
+                title="Refresh Comparison Prices"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              >
+                <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Refresh
+              </button>
+              <button className="primary" onClick={() => openDecisionLab(data.product_id)}>Open in Decision Lab <Sparkles size={13} /></button>
+            </div>
           </div>
 
           {/* Autonomous Browser Agent Live Workstation Status */}
@@ -1722,7 +1798,14 @@ function Compare({ data, back, openDecisionLab, onSwap }: any) {
                   <span className="eyebrow" style={{ color: '#818cf8' }}>SMART BRAND SUBSTITUTES</span>
                   <h3>Alternative Product Recommendations</h3>
                 </div>
-                <RefreshCw size={18} color="#818cf8" />
+                <button
+                  type="button"
+                  onClick={() => onRefresh && onRefresh()}
+                  title="Refresh recommendations"
+                  style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid #6366f1', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 8, color: '#a5b4fc' }}
+                >
+                  <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+                </button>
               </div>
               <div className="listing-grid">
                 {data.substitutes.map((sub: any, idx: number) => (
