@@ -211,15 +211,18 @@ def product_summary(db, pid, include_details: bool = True):
   out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price,p.name)})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
- substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total']) if include_details else []
- sustainability = calculate_sustainability_score(p.category or 'General', p.name, best_item.get('store', '')) if include_details else {'eco_grade': 'A', 'badge': '🌱 Verified'}
+ p_cat = p.category if (p.category and p.category not in ('ELECTRONICS', 'General')) else classify_product_category(p.name)
+ if is_laptop_product(p.name):
+  p_cat = 'LAPTOP'
+ substitutes = generate_smart_substitutes(p.name, p_cat, best_item['true_total']) if include_details else []
+ sustainability = calculate_sustainability_score(p_cat, p.name, best_item.get('store', '')) if include_details else {'eco_grade': 'A', 'badge': '🌱 Verified'}
  return {
   'product_id':pid,
   'product':p.name,
   'brand':p.brand,
   'model':p.model,
   'variant':p.variant,
-  'category':p.category,
+  'category':p_cat,
   'listings':sorted(out,key=lambda x:x['true_total']),
   'best':best_item,
   'substitutes':substitutes,
@@ -327,12 +330,20 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
     best_match = p
 
  if best_match:
+  # Upgrade category if missing or generic
+  det_cat = classify_product_category(best_match.name)
+  if is_laptop_product(best_match.name):
+   det_cat = 'LAPTOP'
+  if not best_match.category or best_match.category in ('ELECTRONICS', 'General'):
+   best_match.category = det_cat
+   best_match.specs = f"Category: {det_cat}"
+
   # Check if best_match has obsolete/fallback prices while default_price is a genuine verified price
   if default_price and default_price > 0:
    cur_listings = db.query(StoreListing).filter_by(product_id=best_match.id).all()
    cur_prices = [l.price for l in cur_listings if l.price > 0]
    if not cur_prices or any(abs(cp - default_price) / max(cp, default_price) > 0.35 for cp in cur_prices):
-    sync_product_store_prices(db, best_match, default_price, best_match.category or 'ELECTRONICS', best_match.name, pincode)
+    sync_product_store_prices(db, best_match, default_price, best_match.category or det_cat, best_match.name, pincode)
   return best_match
 
  category = classify_product_category(clean)
@@ -340,18 +351,63 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
   category = 'LAPTOP'
  est_price = default_price if (default_price and default_price > 0) else estimate_item_market_price(clean, category)
 
- # Extract clean, concise brand name using comprehensive brand map
+ # Extract clean, concise brand name using comprehensive multi-category brand map
  _brands = {
+  # Smartphones, Computers & Tech
   'samsung': 'Samsung', 'apple': 'Apple', 'iphone': 'Apple', 'ipad': 'Apple', 'macbook': 'Apple',
   'oneplus': 'OnePlus', 'sony': 'Sony', 'xiaomi': 'Xiaomi', 'redmi': 'Xiaomi', 'poco': 'POCO',
   'realme': 'Realme', 'vivo': 'Vivo', 'oppo': 'OPPO', 'motorola': 'Motorola', 'moto ': 'Motorola',
   'nothing': 'Nothing', 'google': 'Google', 'pixel': 'Google', 'nokia': 'Nokia', 'asus': 'ASUS',
   'lenovo': 'Lenovo', 'hp ': 'HP', 'dell': 'Dell', 'acer': 'Acer', 'lg ': 'LG',
   'bosch': 'Bosch', 'boat': 'boAt', 'jbl': 'JBL', 'bose': 'Bose', 'dyson': 'Dyson',
-  'philips': 'Philips', 'nike': 'Nike', 'adidas': 'Adidas', 'puma': 'Puma',
+  'philips': 'Philips',
+  # Footwear
+  'nike': 'Nike', 'adidas': 'Adidas', 'puma': 'Puma', 'asics': 'Asics', 'woodland': 'Woodland',
+  'bata': 'Bata', 'red tape': 'Red Tape', 'crocs': 'Crocs', 'skechers': 'Skechers',
+  'campus': 'Campus', 'sparx': 'Sparx', 'reebok': 'Reebok', 'under armour': 'Under Armour',
+  'new balance': 'New Balance', 'clarks': 'Clarks', 'metro': 'Metro', 'liberty': 'Liberty',
+  # Watches & Smartwatches
+  'titan': 'Titan', 'fastrack': 'Fastrack', 'fossil': 'Fossil', 'casio': 'Casio',
+  'amazfit': 'Amazfit', 'noise': 'Noise', 'fire-boltt': 'Fire-Boltt', 'timex': 'Timex',
+  'daniel wellington': 'Daniel Wellington', 'tissot': 'Tissot', 'garmin': 'Garmin',
+  'seiko': 'Seiko', 'citizen': 'Citizen', 'sonata': 'Sonata',
+  # Power Banks & Accessories
+  'anker': 'Anker', 'ambrane': 'Ambrane', 'urbn': 'URBN', 'portronics': 'Portronics',
+  'belkin': 'Belkin', 'duracell': 'Duracell', 'spigen': 'Spigen', 'stuffcool': 'Stuffcool',
+  # Televisions
+  'tcl': 'TCL', 'hisense': 'Hisense', 'vu ': 'Vu', 'thomson': 'Thomson',
+  'toshiba': 'Toshiba', 'sansui': 'Sansui', 'panasonic': 'Panasonic',
+  # Air Conditioners
+  'voltas': 'Voltas', 'daikin': 'Daikin', 'blue star': 'Blue Star', 'lloyd': 'Lloyd',
+  'hitachi': 'Hitachi', 'carrier': 'Carrier', 'onida': 'Onida',
+  # Geysers & Water Heaters
+  'ao smith': 'AO Smith', 'havells': 'Havells', 'crompton': 'Crompton', 'racold': 'Racold',
+  'v-guard': 'V-Guard', 'bajaj': 'Bajaj', 'orient': 'Orient', 'venus': 'Venus', 'usha': 'Usha',
+  # Refrigerators
+  'whirlpool': 'Whirlpool', 'haier': 'Haier', 'godrej': 'Godrej', 'liebherr': 'Liebherr',
+  'kelvinator': 'Kelvinator', 'voltas beko': 'Voltas Beko',
+  # Ovens & Microwaves
+  'ifb': 'IFB', 'morphy richards': 'Morphy Richards', 'borosil': 'Borosil',
+  # Mixer Grinders
+  'sujata': 'Sujata', 'preethi': 'Preethi', 'prestige': 'Prestige', 'butterfly': 'Butterfly',
+  'maharaja whiteline': 'Maharaja Whiteline', 'wonderchef': 'Wonderchef', 'atomberg': 'Atomberg',
+  # Storage Boxes & Organizers
+  'ikea': 'IKEA', 'nilkamal': 'Nilkamal', 'cello': 'Cello', 'milton': 'Milton',
+  'tupperware': 'Tupperware', 'kuber industries': 'Kuber Industries', 'prettykrafts': 'PrettyKrafts',
+  'home centre': 'Home Centre', 'solimo': 'Amazon Solimo',
+  # Fashion & Apparel
+  'allen solly': 'Allen Solly', 'peter england': 'Peter England', 'van heusen': 'Van Heusen',
+  'louis philippe': 'Louis Philippe', 'arrow': 'Arrow', 'raymond': 'Raymond', "levi's": "Levi's",
+  'levi': "Levi's", 'us polo': 'U.S. Polo Assn.', 'u.s. polo': 'U.S. Polo Assn.',
+  'tommy hilfiger': 'Tommy Hilfiger', 'calvin klein': 'Calvin Klein', 'zara': 'Zara', 'h&m': 'H&M',
+  'marks & spencer': 'Marks & Spencer', 'flying machine': 'Flying Machine', 'pepe jeans': 'Pepe Jeans',
+  'spykar': 'Spykar', 'mufti': 'Mufti', 'blackberrys': 'Blackberrys', 'park avenue': 'Park Avenue',
+  'wrogn': 'WROGN', 'roadster': 'Roadster', 'highlander': 'Highlander'
  }
  clean_lower = clean.lower()
- clean_brand = next((v for k, v in _brands.items() if k in clean_lower), None)
+ # Check longer matches first to avoid prefix collisions
+ _sorted_brands = sorted(_brands.items(), key=lambda x: len(x[0]), reverse=True)
+ clean_brand = next((v for k, v in _sorted_brands if k in clean_lower), None)
  if not clean_brand:
   clean_brand = clean.split()[0].capitalize()[:40] if clean and not clean.startswith('http') else 'Genuine Brand'
 
@@ -454,8 +510,9 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
      seller=seller.name[:160]
     ))
 
-   if obs.price > 0:
-    sync_product_store_prices(db, matched_prod, obs.price, matched_prod.category or 'ELECTRONICS', matched_prod.name, pincode)
+    if obs.price > 0:
+     cat = 'LAPTOP' if is_laptop_product(matched_prod.name) else (classify_product_category(matched_prod.name) if (not matched_prod.category or matched_prod.category in ('ELECTRONICS', 'General')) else matched_prod.category)
+     sync_product_store_prices(db, matched_prod, obs.price, cat, matched_prod.name, pincode)
 
    it = ShoppingItem(
     list_id=sl.id,
@@ -853,7 +910,7 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
    ))
 
  if source.price > 0:
-  cat = 'LAPTOP' if is_laptop_product(product.name) else (product.category or 'ELECTRONICS')
+  cat = 'LAPTOP' if is_laptop_product(product.name) else (classify_product_category(product.name) if (not product.category or product.category in ('ELECTRONICS', 'General')) else product.category)
   sync_product_store_prices(db, product, source.price, cat, product.name, pincode)
 
  sl=user_list(db,u)
@@ -916,10 +973,11 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
  skeptic=generate_second_opinion(dec['decision'],current_price,hist,p.name,pref=pref)
  why_not=generate_why_not_buy(current_price,hist,p.__dict__,pref=pref)
+ cat = c.get('category') or (classify_product_category(p.name) if (not p.category or p.category in ('ELECTRONICS', 'General')) else p.category)
+ ownership=calculate_ownership_cost(current_price,cat,product_name=p.name,pref=pref)
+ compat=check_compatibility(p.name,p.specs or f"Category: {cat}",pref=pref)
+ reviews=get_review_intelligence(p.name, cat, pref=pref)
  deal_truth=analyze_deal_truth(best.get('price',current_price),current_price,hist)
- ownership=calculate_ownership_cost(current_price,p.category or 'Electronics',product_name=p.name,pref=pref)
- compat=check_compatibility(p.name,p.specs or '',pref=pref)
- reviews=get_review_intelligence(p.name, p.category or 'General', pref=pref)
  # Derive seller trust from real listing data
  best_listing = db.query(StoreListing).filter_by(product_id=product_id).order_by(StoreListing.price.asc()).first()
  delivery_days = best_listing.delivery_days if best_listing and best_listing.delivery_days else 2
@@ -961,6 +1019,8 @@ def manual_monitor_check(task_id:int,u=Depends(current_user),db:Session=Depends(
  listings=db.query(StoreListing).filter_by(product_id=prod.id).all()
  best_price=None
  for l in listings:
+  if not l.url or any(k in l.url.lower() for k in ['/s?', '/search', 'google.com', 'bing.com', 'duckduckgo.com']):
+   continue
   try:
    obs=connector_for(l.url).observe_url(l.url)
    if obs and obs.price>0:

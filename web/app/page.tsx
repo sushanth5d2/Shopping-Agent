@@ -721,8 +721,8 @@ export default function App() {
               data={decisionData}
               onSelectProduct={openDecisionLab}
               onSwap={swapItem}
-              onRefresh={async () => {
-                const pidToRefresh = decisionPid || (decisionData && decisionData.product_id) || (items.find((x: any) => x.product_id)?.product_id);
+              onRefresh={async (targetPid?: number) => {
+                const pidToRefresh = targetPid || decisionPid || (decisionData && decisionData.product_id) || (items.find((x: any) => x.product_id)?.product_id);
                 if (pidToRefresh) {
                   await openDecisionLab(pidToRefresh);
                 }
@@ -1014,10 +1014,37 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
 function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, onRefresh, refreshing }: any) {
   const productItems = items.filter((x: any) => x.product_id);
   const activePid = selectedPid || (data && data.product_id) || (productItems[0]?.product_id);
+  const linkedItem = items.find((x: any) => x.product_id === activePid);
+  const linkedItemId = linkedItem ? linkedItem.id : activePid;
+
   if (!data) return (
     <div className="stack">
-      <PageTitle eyebrow="AI INTELLIGENCE" title="Decision Lab" meta="Deep Product & Price Analysis" />
-      <div className="panel"><Empty text="Select an active product to inspect Decision Lab intelligence." /></div>
+      <div className="page-title">
+        <div>
+          <span className="eyebrow">AI INTELLIGENCE</span>
+          <h2>Decision Lab</h2>
+        </div>
+        {productItems.length > 0 && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <select className="batch-target" value={activePid || ''} onChange={e => onSelectProduct(Number(e.target.value))}>
+              {productItems.map((p: any) => (
+                <option key={p.id} value={p.product_id}>{cleanProductName(p.name, 45)}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => activePid && onSelectProduct(activePid)}
+              disabled={refreshing}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Sparkles size={14} className={refreshing ? 'animate-spin' : ''} />
+              <span>{refreshing ? 'Analyzing...' : 'Run Lab Analysis'}</span>
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="panel"><Empty text={productItems.length > 0 ? "Select a product above and click 'Run Lab Analysis' to generate deep intelligence." : "Select an active product to inspect Decision Lab intelligence."} /></div>
     </div>
   );
 
@@ -1044,7 +1071,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
           <button
             type="button"
             className="secondary"
-            onClick={() => onRefresh ? onRefresh() : (activePid && onSelectProduct(activePid))}
+            onClick={() => onRefresh ? onRefresh(activePid) : (activePid && onSelectProduct(activePid))}
             title="Refresh Decision Lab Analysis"
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, fontSize: 13, borderColor: '#6366f1', color: '#c7d2fe' }}
           >
@@ -1052,7 +1079,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
             <span>Refresh Lab</span>
           </button>
           {productItems.length > 1 && (
-            <select className="batch-target" value={selectedPid || ''} onChange={e => onSelectProduct(Number(e.target.value))}>
+            <select className="batch-target" value={selectedPid || activePid || ''} onChange={e => onSelectProduct(Number(e.target.value))}>
               {productItems.map((p: any) => (
                 <option key={p.id} value={p.product_id}>{cleanProductName(p.name, 45)}</option>
               ))}
@@ -1337,7 +1364,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
             </div>
             <button
               type="button"
-              onClick={() => onRefresh ? onRefresh() : (selectedPid && onSelectProduct(selectedPid))}
+              onClick={() => onRefresh ? onRefresh(activePid) : (activePid && onSelectProduct(activePid))}
               title="Refresh Brand Substitutes & Recommendations"
               style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid #6366f1', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 8, color: '#a5b4fc', transition: 'all 0.2s' }}
             >
@@ -1370,7 +1397,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
                 <button
                   type="button"
                   className="primary"
-                  onClick={() => onSwap && selectedPid && onSwap(selectedPid, sub.name)}
+                  onClick={() => onSwap && linkedItemId && onSwap(linkedItemId, sub.name)}
                   style={{ width: '100%', padding: '8px 12px', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 >
                   <RefreshCw size={13} /> 1-Click Swap with this
