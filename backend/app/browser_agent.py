@@ -211,11 +211,58 @@ class BrowserAgent:
             if img_el:
                 result.image_url = img_el.get('src') or img_el.get('data-old-hires', '')
 
+            # STEP 2.5: Extract Real Bank / Card / EMI Offers directly from the product page
+            extracted_offers = []
+            offer_boxes = soup.select('.offers-items .a-section, #itembox-InstantBankDiscount, #itembox-Cashback, #itembox-NoCostEmi, #itembox-Partner, div[id*="offers"] .a-carousel-card, div._2k6Cbx, div.x7E-0b, li:has(span:-soup-contains("Bank Offer"))')
+            for ob in offer_boxes:
+                ob_text = ob.get_text(separator=' ', strip=True)
+                if not ob_text or len(ob_text) < 8 or len(ob_text) > 300:
+                    continue
+                ob_low = ob_text.lower()
+                o_type = 'INSTANT DISCOUNT'
+                o_badge = 'BANK OFFER'
+                if 'emi' in ob_low:
+                    o_type = 'NO COST EMI'
+                    o_badge = '0% INTEREST EMI'
+                elif 'cashback' in ob_low:
+                    o_type = 'CASHBACK'
+                    o_badge = 'CASHBACK'
+                elif 'partner' in ob_low or 'gst' in ob_low:
+                    o_type = 'PARTNER OFFER'
+                    o_badge = 'PARTNER'
+
+                bank = 'Partner Banks'
+                for b_cand in ['HDFC', 'ICICI', 'SBI', 'Axis', 'Flipkart Axis', 'Amazon Pay ICICI', 'Kotak', 'Federal', 'OneCard', 'BHIM', 'Mobikwik', 'Tata Neu']:
+                    if b_cand.lower() in ob_low:
+                        bank = f'{b_cand} Card'
+                        break
+
+                disc_val = 0.0
+                disc_m = re.search(r'(?:₹|Rs\.?)\s*([\d,]+(?:\.\d+)?)', ob_text)
+                if disc_m:
+                    try:
+                        parsed_d = float(disc_m.group(1).replace(',', ''))
+                        if parsed_d < price_val:
+                            disc_val = parsed_d
+                    except Exception:
+                        pass
+
+                extracted_offers.append({
+                    'bank': bank,
+                    'offer': ob_text[:120],
+                    'effective_price': max(0.0, round(price_val - disc_val, 2)) if disc_val > 0 else price_val,
+                    'type': o_type,
+                    'badge': o_badge
+                })
+
+            result.bank_offers = extracted_offers[:6]
+
             self._notify(task_id, 'PRODUCT_IDENTIFIED', f'Verified product: {title[:50]}... at ₹{price_val:,.2f}', {
                 'title': title,
                 'price': price_val,
                 'brand': result.brand,
-                'bullets_count': len(bullets)
+                'bullets_count': len(bullets),
+                'offers_count': len(result.bank_offers)
             })
 
             # STEP 3: Extract Real Customer Reviews
@@ -275,9 +322,9 @@ class BrowserAgent:
             clean_search = re.split(r'\(|with\b|,\s*\d+GB', title)[0].strip() or title[:35]
 
             competitors_to_check = [
-                ('Vijay Sales', 'vijaysales.com', f'https://www.vijaysales.com/search/{urllib.parse.quote_plus(clean_search)}', 'span.sp-price'),
+                ('Vijay Sales', 'vijaysales.com', f'https://www.vijaysales.com/search?q={urllib.parse.quote_plus(clean_search)}', 'span.sp-price'),
                 ('Flipkart', 'flipkart.com', f'https://www.flipkart.com/search?q={urllib.parse.quote_plus(clean_search)}', 'div.Nx9bqj'),
-                ('Croma', 'croma.com', f'https://www.croma.com/search?q={urllib.parse.quote_plus(clean_search)}', 'span.amount'),
+                ('Croma', 'croma.com', f'https://www.croma.com/search/?q={urllib.parse.quote_plus(clean_search)}', 'span.amount'),
             ]
             for store_name, domain, search_url, price_selector in competitors_to_check:
                 try:

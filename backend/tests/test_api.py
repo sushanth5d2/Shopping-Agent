@@ -181,4 +181,38 @@ def test_invoice_scanning_and_receipt_generation():
         assert inv_data['total'] > 0
         assert len(inv_data['items']) >= 1
 
+def test_monitoring_and_store_offers():
+    with TestClient(app) as c:
+        email = 'monitor-test@example.com'
+        password = 'password123'
+        r = c.post('/api/auth/register', json={'email': email, 'password': password})
+        if r.status_code == 409:
+            r = c.post('/api/auth/login', json={'email': email, 'password': password})
+        token = r.json()['access_token']
+        headers = {'Authorization': f'Bearer {token}'}
+
+        # 1. Add item with mode MONITOR
+        add_res = c.post('/api/items', headers=headers, json={
+            'name': 'Samsung Galaxy Z Fold 6',
+            'quantity': 1,
+            'target_price': 140000.0,
+            'mode': 'MONITOR',
+            'purchase_mode': 'ASK'
+        })
+        assert add_res.status_code == 200
+
+        # 2. Query monitoring tasks
+        mon_res = c.get('/api/monitoring', headers=headers)
+        assert mon_res.status_code == 200
+        data = mon_res.json()
+        assert 'tasks' in data and 'items' in data
+        assert len(data['tasks']) >= 1
+        t_id = data['tasks'][0]['id']
+
+        # 3. Manual check on monitoring task
+        chk_res = c.post(f'/api/monitoring/{t_id}/check', headers=headers)
+        assert chk_res.status_code == 200
+        assert chk_res.json()['ok'] is True
+
+
 

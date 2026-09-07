@@ -38,6 +38,7 @@ class ProductObservation:
     bullets: list = None
     real_reviews: list = None
     image_url: str = ''
+    card_offers: list = None
 
 class StoreConnector:
     name = 'abstract'
@@ -120,7 +121,8 @@ class JsonLdWebConnector(StoreConnector):
                     observed_live=True,
                     bullets=b_res.bullets or [],
                     real_reviews=b_res.reviews or [],
-                    image_url=b_res.image_url
+                    image_url=b_res.image_url,
+                    card_offers=b_res.bank_offers or []
                 )
         except Exception:
             pass

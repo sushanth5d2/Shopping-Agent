@@ -209,7 +209,7 @@ export default function App() {
       ]);
       setData(d);
       setItems(i.items || []);
-      setMonitor(m.tasks || []);
+      setMonitor(m.tasks || m.items || []);
       setOrders(o || []);
       setActivity(a || []);
       setDeals(de.deals || []);
@@ -1107,19 +1107,28 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
               <a className="retailer-link" href={art.url} target="_blank" rel="noreferrer">Open Review <ExternalLink size={13} /></a>
             </div>
           ))}
-          {(reviews.youtube_reviews || []).map((yt: any, i: number) => (
-            <div className="listing-card" key={`yt-${i}`}>
-              <div className="listing-head">
-                <span className="store-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <PlayCircle size={16} color="#ef4444" /> {yt.channel}
-                </span>
-                <span className="status purple">Video</span>
+          {(() => {
+            const seenYt = new Set();
+            const uniqueYt = (reviews.youtube_reviews || []).filter((yt: any) => {
+              const key = yt.video_id || yt.url || yt.title;
+              if (!key || seenYt.has(key)) return false;
+              seenYt.add(key);
+              return true;
+            });
+            return uniqueYt.map((yt: any, i: number) => (
+              <div className="listing-card" key={`yt-${yt.video_id || i}`}>
+                <div className="listing-head">
+                  <span className="store-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <PlayCircle size={16} color="#ef4444" /> {yt.channel}
+                  </span>
+                  <span className="status purple">Video</span>
+                </div>
+                <b style={{ display: 'block', fontSize: 13, color: '#fff', margin: '10px 0 4px' }}>{yt.title}</b>
+                <p style={{ fontSize: 12, color: '#94a3b8' }}>{yt.findings}</p>
+                <a className="retailer-link" href={yt.url} target="_blank" rel="noreferrer">Watch on YouTube <ExternalLink size={13} /></a>
               </div>
-              <b style={{ display: 'block', fontSize: 13, color: '#fff', margin: '10px 0 4px' }}>{yt.title}</b>
-              <p style={{ fontSize: 12, color: '#94a3b8' }}>{yt.findings}</p>
-              <a className="retailer-link" href={yt.url} target="_blank" rel="noreferrer">Watch on YouTube <ExternalLink size={13} /></a>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
 
         {/* Verified Customer Reviews (Amazon & Flipkart Buyers) */}
@@ -1438,17 +1447,17 @@ function Monitoring({ rows, refresh, openDecisionLab, onCheck, onDelete }: any) 
           {filtered.map((m: any) => (
             <div className="monitor-line" key={m.id}>
               <div className="monitor-product">
-                <div className="product-thumb">{m.item.name.slice(0, 2).toUpperCase()}</div>
-                <div><b>{m.item.name}</b><small>{m.item.purchase_mode} • {m.item.quantity} unit{m.item.quantity > 1 ? 's' : ''}</small></div>
+                <div className="product-thumb">{(m.item?.name || 'MP').slice(0, 2).toUpperCase()}</div>
+                <div><b>{m.item?.name || 'Monitored Product'}</b><small>{m.item?.purchase_mode || 'MONITOR'} • {m.item?.quantity || 1} unit{(m.item?.quantity || 1) > 1 ? 's' : ''}</small></div>
               </div>
-              <strong>{m.best?.true_total ? `₹${m.best.true_total.toLocaleString()}` : 'Unavailable'}</strong>
-              <span>{m.item.target_price ? `₹${m.item.target_price.toLocaleString()}` : '—'}</span>
+              <strong>{m.best?.true_total ? `₹${Number(m.best.true_total).toLocaleString()}` : 'Unavailable'}</strong>
+              <span>{m.item?.target_price ? `₹${Number(m.item.target_price).toLocaleString()}` : '—'}</span>
               <span className={`status ${m.status === 'TARGET_REACHED' ? 'green' : 'purple'}`}>{m.status === 'TARGET_REACHED' ? 'TARGET REACHED' : 'MONITORING'}</span>
               <span className="next"><Clock3 size={13} />{m.next_check ? new Date(m.next_check).toLocaleString() : 'scheduled'}</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="icon-action" title="Check Live Price" onClick={() => onCheck(m.id)}><Zap size={14} /></button>
-                <button className="icon-action" title="Decision Lab" onClick={() => m.item.product_id && openDecisionLab(m.item.product_id)}><Sparkles size={14} /></button>
-                <button className="icon-action" title="Delete Monitor" onClick={() => onDelete(m.item.id)} style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
+                <button className="icon-action" title="Decision Lab" onClick={() => m.item?.product_id && openDecisionLab(m.item.product_id)}><Sparkles size={14} /></button>
+                <button className="icon-action" title="Delete Monitor" onClick={() => m.item?.id && onDelete(m.item.id)} style={{ color: '#ef4444' }}><Trash2 size={14} /></button>
               </div>
             </div>
           ))}

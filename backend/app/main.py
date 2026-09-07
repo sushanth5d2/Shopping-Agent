@@ -208,7 +208,7 @@ def product_summary(db, pid, include_details: bool = True):
    continue
   seen_stores.add(s_canon)
   seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
-  out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price)})
+  out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price,p.name)})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
  substitutes = generate_smart_substitutes(p.name, p.category or 'General', best_item['true_total']) if include_details else []
@@ -820,7 +820,10 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
   sync_product_store_prices(db, product, source.price, product.category or 'ELECTRONICS', product.name, pincode)
 
  sl=user_list(db,u)
- item=ShoppingItem(list_id=sl.id,name=product.name[:500],quantity=1,target_price=p.target_price,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)
+ target_p = p.target_price
+ if p.monitor and (target_p is None or target_p <= 0) and source.price > 0:
+  target_p = round(source.price * 0.95, -1) if source.price > 100 else round(source.price * 0.95, 2)
+ item=ShoppingItem(list_id=sl.id,name=product.name[:500],quantity=1,target_price=target_p,max_price=p.max_price,mode='MONITOR' if p.monitor else 'BUY_NOW',purchase_mode=p.purchase_mode,product_id=product.id)
  db.add(item);db.flush()
 
  if p.monitor:
@@ -887,9 +890,50 @@ def monitor(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
 @app.get('/api/monitoring')
 def monitoring(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);out=[]
+ # Self-heal any ShoppingItem in MONITOR mode without a task
+ for it_mon in db.query(ShoppingItem).filter_by(list_id=sl.id, mode='MONITOR').all():
+  t_mon = db.query(MonitoringTask).filter_by(item_id=it_mon.id).first()
+  if not t_mon:
+   t_mon = MonitoringTask(item_id=it_mon.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc)+timedelta(minutes=360))
+   db.add(t_mon)
+ db.commit()
  for t in db.query(MonitoringTask).join(ShoppingItem).filter(ShoppingItem.list_id==sl.id).all():
   it=db.get(ShoppingItem,t.item_id);c=product_summary(db,it.product_id,include_details=False) if it.product_id else None;out.append({'id':t.id,'item':item_obj(db,it),'status':t.status,'last_checked':t.last_checked,'next_check':t.next_check,'best':c['best'] if c else None})
- return {'items':out}
+ return {'items':out, 'tasks':out}
+
+@app.post('/api/monitoring/{task_id}/check')
+def manual_monitor_check(task_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ sl=user_list(db,u)
+ task=db.query(MonitoringTask).join(ShoppingItem).filter(MonitoringTask.id==task_id,ShoppingItem.list_id==sl.id).first()
+ if not task: raise HTTPException(404,'Monitoring task not found')
+ it=db.get(ShoppingItem,task.item_id)
+ if not it or not it.product_id: raise HTTPException(400,'Item has no product attached')
+ prod=db.get(Product,it.product_id)
+ now=datetime.now(timezone.utc)
+ listings=db.query(StoreListing).filter_by(product_id=prod.id).all()
+ best_price=None
+ for l in listings:
+  try:
+   obs=connector_for(l.url).observe_url(l.url)
+   if obs and obs.price>0:
+    l.price=obs.price;l.stock=obs.stock;l.observed_at=now
+    tot=true_total(obs.price,obs.delivery,obs.tax,obs.fees,obs.coupon,obs.cashback)
+    db.add(PriceSnapshot(listing_id=l.id,price=obs.price,delivery=obs.delivery,total=tot,stock=obs.stock,seller=(obs.seller or (l.seller.name if l.seller else 'Verified'))[:160]))
+    if best_price is None or tot<best_price: best_price=tot
+  except Exception: pass
+ if best_price is None:
+  try:
+   c=product_summary(db,prod.id,include_details=False)
+   best_price=c['best']['true_total'] if c and c.get('best') else 0.0
+  except Exception: best_price=0.0
+ if it.target_price and best_price>0 and best_price<=it.target_price:
+  task.status="TARGET_REACHED"
+  msg=f"Target reached for {it.name[:35]}: ₹{best_price:,.0f} (Target: ₹{it.target_price:,.0f})"
+  db.add(PriceAlert(item_id=it.id,alert_type="TARGET_REACHED",message=msg))
+  db.add(Notification(user_id=u.id,kind="TARGET",title="Target price reached",message=msg))
+ task.last_checked=now;task.next_check=now+timedelta(minutes=task.interval_minutes)
+ db.commit()
+ return {'ok':True,'status':task.status,'best_price':best_price,'message':f'Price verified: ₹{best_price:,.0f} for {it.name[:35]}'}
 @app.get('/api/deals')
 def deals(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);out=[]
