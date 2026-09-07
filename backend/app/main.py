@@ -255,7 +255,7 @@ def me(u=Depends(current_user)):return {'id':u.id,'email':u.email}
 @app.get('/api/dashboard')
 def dashboard(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u); rows=db.query(ShoppingItem).filter_by(list_id=sl.id).all(); orders=db.query(Order).filter_by(user_id=u.id).all();mon=db.query(MonitoringTask).join(ShoppingItem).filter(ShoppingItem.list_id==sl.id).count();alerts=db.query(PriceAlert).join(ShoppingItem).filter(ShoppingItem.list_id==sl.id,PriceAlert.read==False).count()
- return {'todo':[item_obj(db,x) for x in rows if x.status=='TODO'],'completed':[item_obj(db,x) for x in rows if x.status=='COMPLETED'],'stats':{'monitored':mon,'targets':alerts,'verified_savings':round(sum(x.savings for x in orders),2),'completed':sum(x.status=='COMPLETED' for x in rows)}}
+ return {'todo':[item_obj(db,x) for x in rows if x.status=='TODO'],'completed':[item_obj(db,x) for x in rows if x.status=='COMPLETED'],'saved_for_later':[item_obj(db,x) for x in rows if x.status in ('BUY_LATER','SAVED_FOR_LATER')],'stats':{'monitored':mon,'targets':alerts,'verified_savings':round(sum(x.savings for x in orders),2),'completed':sum(x.status=='COMPLETED' for x in rows)}}
 @app.get('/api/items')
 def items(u=Depends(current_user),db:Session=Depends(get_db)):
  sl=user_list(db,u);return {'items':[item_obj(db,x) for x in db.query(ShoppingItem).filter_by(list_id=sl.id).order_by(ShoppingItem.created_at.desc()).all()]}
@@ -1338,9 +1338,14 @@ def add_family(p:FamilyIn,u=Depends(current_user),db:Session=Depends(get_db)):
 def savings(u=Depends(current_user),db:Session=Depends(get_db)):
  o=db.query(Order).filter_by(user_id=u.id).all();return {'verified_savings':round(sum(x.savings for x in o),2),'orders':len(o),'note':'Savings are from verified purchases only.'}
 @app.get('/api/basket')
-def get_basket(u=Depends(current_user),db:Session=Depends(get_db)):
+def get_basket(strategy: str = 'CHEAPEST', item_ids: str | None = None, u=Depends(current_user), db: Session = Depends(get_db)):
  sl=user_list(db,u);data=[]
- for it in db.query(ShoppingItem).filter_by(list_id=sl.id,status='TODO').all():
+ q = db.query(ShoppingItem).filter_by(list_id=sl.id, status='TODO')
+ if item_ids:
+  id_list = [int(x) for x in item_ids.split(',') if x.strip().isdigit()]
+  if id_list:
+   q = q.filter(ShoppingItem.id.in_(id_list))
+ for it in q.all():
   if not it.product_id:continue
-  c=product_summary(db,it.product_id,include_details=False);data.append({'name':it.name,'listings':[{'store':x['store'],'total':x['true_total']} for x in c['listings']]})
- return basket(data)
+  c=product_summary(db,it.product_id,include_details=False);data.append({'name':it.name,'item_id':it.id,'listings':[{'store':x['store'],'total':x['true_total']} for x in c['listings']]})
+ return basket(data, mode=strategy)

@@ -8,7 +8,7 @@ import {
   ShoppingCart, AlertTriangle, PlayCircle, Scale, Clock3,
   Check, Menu, X, Plus, Trash2, Bell, Gift, Users, Leaf,
   FileText, RefreshCw, ThumbsUp, ThumbsDown, CreditCard,
-  CheckCircle2, AlertOctagon, LineChart, TrendingUp
+  CheckCircle2, AlertOctagon, LineChart, TrendingUp, Bookmark, PauseCircle
 } from 'lucide-react';
 
 interface Item {
@@ -528,6 +528,32 @@ export default function App() {
     }
   };
 
+  const saveForLater = async (id: number) => {
+    try {
+      await req(`/api/items/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'BUY_LATER' })
+      });
+      await load();
+      setToast('Item moved to Buy Later');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
+  const moveToCart = async (id: number) => {
+    try {
+      await req(`/api/items/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'TODO' })
+      });
+      await load();
+      setToast('Item moved back to Active Cart');
+    } catch (e: any) {
+      setToast(e.message);
+    }
+  };
+
   const buy = async (id: number) => {
     setBusy(true);
     // Pre-open a blank tab synchronously within user click event to bypass browser popup blockers
@@ -686,6 +712,7 @@ export default function App() {
 
   const todo = items.filter(x => x.status === 'TODO');
   const completed = items.filter(x => x.status === 'COMPLETED');
+  const savedForLater = items.filter(x => x.status === 'BUY_LATER' || x.status === 'SAVED_FOR_LATER');
   const title = tab === 'Home' ? 'Good morning' : tab;
   const stats = [
     ['To-Buy', todo.length, ListChecks, 'neutral'],
@@ -709,6 +736,7 @@ export default function App() {
               <span>{name}</span>
               {name === 'Monitoring' && monitor.length > 0 ? <em>{monitor.length}</em> : null}
               {name === 'To-Buy' && todo.length > 0 ? <em>{todo.length}</em> : null}
+              {name === 'Master Cart' && todo.length > 0 ? <em>{todo.length}</em> : null}
             </button>
           ))}
         </nav>
@@ -745,8 +773,25 @@ export default function App() {
         </header>
 
         <div className="content">
-          {tab === 'Home' && <Home input={input} setInput={setInput} run={run} busy={busy} stats={stats} todo={todo} activity={activity} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} setTab={setTab} productUrl={productUrl} setProductUrl={setProductUrl} analyzeUrl={analyzeUrl} urlBusy={urlBusy} />}
-          {tab === 'To-Buy' && <TodoPage items={todo} completed={completed} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} onAddItem={addNewItem} onDeleteItem={deleteItem} onToggleStatus={toggleItemStatus} onVote={voteItem} />}
+          {tab === 'Home' && <Home input={input} setInput={setInput} run={run} busy={busy} stats={stats} todo={todo} activity={activity} compareItem={compareItem} openDecisionLab={openDecisionLab} buy={buy} startMonitor={startMonitor} setTab={setTab} productUrl={productUrl} setProductUrl={setProductUrl} analyzeUrl={analyzeUrl} urlBusy={urlBusy} onSaveForLater={saveForLater} />}
+          {tab === 'To-Buy' && (
+            <TodoPage
+              items={items}
+              todo={todo}
+              completed={completed}
+              savedForLater={savedForLater}
+              compareItem={compareItem}
+              openDecisionLab={openDecisionLab}
+              buy={buy}
+              startMonitor={startMonitor}
+              onAddItem={addNewItem}
+              onDeleteItem={deleteItem}
+              onToggleStatus={toggleItemStatus}
+              onSaveForLater={saveForLater}
+              onMoveToCart={moveToCart}
+              onVote={voteItem}
+            />
+          )}
           {tab === 'Decision Lab' && (
             <DecisionLabPage
               items={items}
@@ -774,7 +819,11 @@ export default function App() {
                 setBasketData(await req(`/api/basket?strategy=${st}`));
               }}
               todo={todo}
+              savedForLater={savedForLater}
               buyItem={buy}
+              onSaveForLater={saveForLater}
+              onMoveToCart={moveToCart}
+              onDeleteItem={deleteItem}
             />
           )}
           {tab === 'Batch Intake' && <BatchPage urls={batchUrls} setUrls={setBatchUrls} items={batchItems} setItems={setBatchItems} busy={batchBusy} result={batchResult} process={processBatch} monitor={batchMonitor} setMonitor={setBatchMonitor} target={batchTarget} setTarget={setBatchTarget} onScanInvoice={async (txt: string) => { const res = await req('/api/invoices/scan', { method: 'POST', body: JSON.stringify({ text: txt }) }); for (const it of res.items) { await addNewItem(it.item, it.price); } setToast(`Imported ${res.items.length} items from scanned invoice!`); }} />}
@@ -849,7 +898,7 @@ function Auth({ mode, setMode, email, setEmail, password, setPassword, auth, bus
   );
 }
 
-function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, openDecisionLab, buy, startMonitor, setTab, productUrl, setProductUrl, analyzeUrl, urlBusy }: any) {
+function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, openDecisionLab, buy, startMonitor, setTab, productUrl, setProductUrl, analyzeUrl, urlBusy, onSaveForLater }: any) {
   return (
     <div className="stack">
       <section className="hero">
@@ -889,40 +938,28 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
                 padding: '8px 12px',
                 background: 'rgba(15, 23, 42, 0.9)',
                 borderRadius: 8,
-                border: '1px solid #0284c7',
-                color: '#38bdf8',
-                fontSize: 12,
+                border: '1px solid #334155',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8
+                gap: 8,
+                color: '#38bdf8',
+                fontSize: 13
               }}>
-                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#38bdf8' }} />
-                <span>🌐 Autonomous Browser Agent actively navigating target URL with Playwright Stealth Chromium...</span>
+                <Sparkles size={14} className="animate-spin" />
+                <span>Extracting live product specifications, stock status, and real customer reviews…</span>
               </div>
             )}
           </div>
         </div>
-        <div className="hero-visual">
-          <div className="visual-ring ring-a" />
-          <div className="visual-ring ring-b" />
-          <div className="visual-core"><Bot size={36} /><span>AI</span></div>
-          <div className="float-card fc-one"><Target size={14} /><div><b>Price Target</b><span>Watching</span></div></div>
-          <div className="float-card fc-two"><TrendingDown size={14} /><div><b>Best Price</b><span>Verified ₹</span></div></div>
+        <div className="hero-stats">
+          {stats.map(([label, val, Icon, cls]: any) => (
+            <div className={`stat-card ${cls}`} key={label}>
+              <div><span>{label}</span><b>{val}</b></div>
+              <Icon size={24} />
+            </div>
+          ))}
         </div>
       </section>
-
-      <div className="stat-grid">
-        {stats.map(([label, value, Icon, kind]: any) => (
-          <div className="stat-card" key={label}>
-            <div>
-              <span>{label}</span>
-              <b>{value}</b>
-              <small>{label === 'Monitoring' ? 'Automatic checks' : label === 'Verified savings' ? 'From recorded prices' : label === 'Orders' ? 'Purchase history' : 'Active shopping plan'}</small>
-            </div>
-            <div className={`stat-icon ${kind}`}><Icon size={20} /></div>
-          </div>
-        ))}
-      </div>
 
       <div className="dashboard-grid">
         <section className="panel">
@@ -931,7 +968,7 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
             <button className="link-btn" onClick={() => setTab('To-Buy')}>View all <ChevronDown size={14} /></button>
           </div>
           {todo.length ? todo.slice(0, 5).map((i: Item) => (
-            <ProductRow key={i.id} item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} />
+            <ProductRow key={i.id} item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} onSaveForLater={() => onSaveForLater && onSaveForLater(i.id)} />
           )) : (
             <Empty icon={ListChecks} text="Your To-Buy list is clear." action="Add something" onClick={() => document.querySelector<HTMLInputElement>('.command input')?.focus()} />
           )}
@@ -949,8 +986,8 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
   );
 }
 
-function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus, onVote }: any) {
-  const [filter, setFilter] = useState<'ALL' | 'BUY_NOW' | 'MONITOR' | 'COMPLETED'>('ALL');
+function TodoPage({ items, todo, completed, savedForLater = [], compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus, onSaveForLater, onMoveToCart, onVote }: any) {
+  const [filter, setFilter] = useState<'ALL' | 'BUY_NOW' | 'MONITOR' | 'BUY_LATER' | 'COMPLETED'>('ALL');
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemMode, setNewItemMode] = useState('BUY_NOW');
@@ -960,7 +997,9 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
   const [giftMessage, setGiftMessage] = useState('');
   const [giftWrap, setGiftWrap] = useState(false);
 
-  const filteredItems = filter === 'COMPLETED' ? completed : items.filter((x: Item) => {
+  const activeItems = items.filter((x: Item) => x.status !== 'COMPLETED' && x.status !== 'BUY_LATER' && x.status !== 'SAVED_FOR_LATER');
+
+  const filteredItems = filter === 'COMPLETED' ? completed : filter === 'BUY_LATER' ? savedForLater : activeItems.filter((x: Item) => {
     if (filter === 'BUY_NOW') return x.mode === 'BUY_NOW';
     if (filter === 'MONITOR') return x.mode === 'MONITOR';
     return true;
@@ -988,7 +1027,7 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
 
   return (
     <div className="stack">
-      <PageTitle eyebrow="SMART SHOPPING LIST" title="To-Buy" meta={`${items.length} active items`} />
+      <PageTitle eyebrow="SMART SHOPPING LIST" title="To-Buy" meta={`${activeItems.length} active • ${savedForLater.length} buy later`} />
 
       {/* Add New Item Form with Gift Mode */}
       <form className="panel" onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1034,9 +1073,10 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
 
       <div className="panel">
         <div className="filterbar">
-          <button className={`filter ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>All <span>{items.length}</span></button>
-          <button className={`filter ${filter === 'BUY_NOW' ? 'active' : ''}`} onClick={() => setFilter('BUY_NOW')}>Buy Now <span>{items.filter((x: any) => x.mode === 'BUY_NOW').length}</span></button>
-          <button className={`filter ${filter === 'MONITOR' ? 'active' : ''}`} onClick={() => setFilter('MONITOR')}>Monitor <span>{items.filter((x: any) => x.mode === 'MONITOR').length}</span></button>
+          <button className={`filter ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>Active <span>{activeItems.length}</span></button>
+          <button className={`filter ${filter === 'BUY_NOW' ? 'active' : ''}`} onClick={() => setFilter('BUY_NOW')}>Buy Now <span>{activeItems.filter((x: any) => x.mode === 'BUY_NOW').length}</span></button>
+          <button className={`filter ${filter === 'MONITOR' ? 'active' : ''}`} onClick={() => setFilter('MONITOR')}>Monitor <span>{activeItems.filter((x: any) => x.mode === 'MONITOR').length}</span></button>
+          <button className={`filter ${filter === 'BUY_LATER' ? 'active' : ''}`} onClick={() => setFilter('BUY_LATER')}>Buy Later <span>{savedForLater.length}</span></button>
           <button className={`filter ${filter === 'COMPLETED' ? 'active' : ''}`} onClick={() => setFilter('COMPLETED')}>Completed <span>{completed.length}</span></button>
         </div>
         {filteredItems.length ? filteredItems.map((i: Item) => (
@@ -1045,7 +1085,16 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
               <Check size={20} />
             </button>
             <div style={{ flex: 1 }}>
-              <ProductRow item={i} compare={() => compareItem(i)} openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)} buy={() => buy(i.id)} monitor={() => startMonitor(i.id)} onVote={onVote} />
+              <ProductRow
+                item={i}
+                compare={() => compareItem(i)}
+                openDecisionLab={() => i.product_id && openDecisionLab(i.product_id)}
+                buy={() => buy(i.id)}
+                monitor={() => startMonitor(i.id)}
+                onSaveForLater={() => onSaveForLater && onSaveForLater(i.id)}
+                onMoveToCart={() => onMoveToCart && onMoveToCart(i.id)}
+                onVote={onVote}
+              />
             </div>
             <button onClick={() => onDeleteItem(i.id)} title="Delete item" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 8 }}>
               <Trash2 size={16} />
@@ -1727,7 +1776,7 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
   );
 }
 
-function MasterCartPage({ data, strategy, setStrategy, todo, buyItem }: any) {
+function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [], buyItem, onSaveForLater, onMoveToCart, onDeleteItem }: any) {
   const stores = data?.stores || {};
   const total = Number(data?.total || 0);
   const savings = Number(data?.savings || 0);
@@ -1741,7 +1790,9 @@ function MasterCartPage({ data, strategy, setStrategy, todo, buyItem }: any) {
 
   return (
     <div className="stack">
-      <PageTitle eyebrow="MULTI-STORE OPTIMIZER" title="Master Cart" meta={`${todo.length} products in shopping plan`} />
+      <PageTitle eyebrow="MULTI-STORE OPTIMIZER" title="Master Cart" meta={`${todo.length} active in basket • ${savedForLater.length} saved for later`} />
+      
+      {/* Active Basket Panel */}
       <div className="panel">
         <div className="panel-head">
           <div><span className="eyebrow">OPTIMIZATION STRATEGY</span><h3>Cross-Store Cart</h3></div>
@@ -1753,7 +1804,7 @@ function MasterCartPage({ data, strategy, setStrategy, todo, buyItem }: any) {
         <div className="dashboard-grid">
           <div>
             <p style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 14 }}>
-              ShopAgent splits your shopping needs across verified retailers to ensure you get the absolute lowest combined total. Click checkout for any store or item below.
+              ShopAgent splits your shopping needs across verified retailers to ensure you get the absolute lowest combined total. Click <b>Buy Later</b> on previous items to postpone them so they don't block your current checkout.
             </p>
             {Object.keys(stores).length ? Object.entries(stores).map(([storeName, amount]: any) => (
               <div className="completed-row" key={storeName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#1e293b', borderRadius: 8, marginBottom: 8 }}>
@@ -1777,18 +1828,50 @@ function MasterCartPage({ data, strategy, setStrategy, todo, buyItem }: any) {
             {/* Todo Items in Cart List */}
             {todo.length > 0 && (
               <div style={{ marginTop: 18 }}>
-                <h4 style={{ fontSize: 13, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, fontWeight: 700 }}>Items in Plan ({todo.length})</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <h4 style={{ fontSize: 13, color: '#94a3b8', textTransform: 'uppercase', margin: 0, fontWeight: 700 }}>
+                    Active Basket Items ({todo.length})
+                  </h4>
+                  {todo.length > 1 && (
+                    <span style={{ fontSize: 11, color: '#64748b' }}>
+                      Click 'Buy Later' to defer non-current items
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {todo.map((it: any) => (
-                    <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, fontSize: 13 }}>
-                      <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{cleanProductName(it.name, 45)}</span>
-                      <button
-                        className="secondary"
-                        style={{ padding: '5px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                        onClick={() => buyItem(it.id)}
-                      >
-                        <span>Buy Now ↗</span>
-                      </button>
+                    <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, fontSize: 13, gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                        <span style={{ color: '#e2e8f0', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
+                          {cleanProductName(it.name, 45)}
+                        </span>
+                        {it.current_price ? <span style={{ color: '#38bdf8', fontSize: 12, fontWeight: 600 }}>₹{Number(it.current_price).toLocaleString()}</span> : null}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <button
+                          className="secondary"
+                          style={{ padding: '4px 8px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                          title="Move to Buy Later: removes from active basket total"
+                          onClick={() => onSaveForLater && onSaveForLater(it.id)}
+                        >
+                          <PauseCircle size={13} />
+                          <span>Buy Later</span>
+                        </button>
+                        <button
+                          className="primary"
+                          style={{ padding: '5px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          onClick={() => buyItem(it.id)}
+                        >
+                          <span>Buy Now ↗</span>
+                        </button>
+                        <button
+                          onClick={() => onDeleteItem && onDeleteItem(it.id)}
+                          title="Remove item"
+                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 4 }}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1812,6 +1895,69 @@ function MasterCartPage({ data, strategy, setStrategy, todo, buyItem }: any) {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Saved for Later Section */}
+      <div className="panel" style={{ marginTop: 8 }}>
+        <div className="panel-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bookmark size={18} color="#f59e0b" />
+            <div>
+              <span className="eyebrow" style={{ color: '#f59e0b' }}>DEFERRED PRODUCTS</span>
+              <h3 style={{ margin: 0 }}>Saved for Later ({savedForLater.length})</h3>
+            </div>
+          </div>
+        </div>
+        <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 14px' }}>
+          Items moved to Buy Later are kept here safely. They are excluded from your Master Cart combined total so you can check out your current shopping list without interference.
+        </p>
+
+        {savedForLater.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {savedForLater.map((it: any) => (
+              <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: 10, fontSize: 13, gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                  <b style={{ color: '#fff', fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
+                    {cleanProductName(it.name, 60)}
+                  </b>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 2, fontSize: 12, color: '#94a3b8' }}>
+                    {it.current_price ? <span>Price: <strong style={{ color: '#38bdf8' }}>₹{Number(it.current_price).toLocaleString()}</strong></span> : null}
+                    {it.target_price ? <span>Target: ₹{Number(it.target_price).toLocaleString()}</span> : null}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <button
+                    className="primary"
+                    style={{ padding: '6px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#0284c7', borderColor: '#0369a1' }}
+                    onClick={() => onMoveToCart && onMoveToCart(it.id)}
+                    title="Move back to active Master Cart basket"
+                  >
+                    <ShoppingCart size={13} />
+                    <span>Move to Cart</span>
+                  </button>
+                  <button
+                    className="secondary"
+                    style={{ padding: '6px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    onClick={() => buyItem(it.id)}
+                  >
+                    <span>Buy Now ↗</span>
+                  </button>
+                  <button
+                    onClick={() => onDeleteItem && onDeleteItem(it.id)}
+                    title="Delete item permanently"
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 6 }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: 13, background: 'rgba(15, 23, 42, 0.4)', borderRadius: 8 }}>
+            No items in Buy Later. Click "Buy Later" on any active cart item to postpone it.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2770,14 +2916,22 @@ function SettingToggle({ title, text, value, onChange }: any) {
   );
 }
 
-function ProductRow({ item, compare, openDecisionLab, buy, monitor, onVote }: any) {
+function ProductRow({ item, compare, openDecisionLab, buy, monitor, onSaveForLater, onMoveToCart, onVote }: any) {
+  const isSavedForLater = item.status === 'BUY_LATER' || item.status === 'SAVED_FOR_LATER';
+
   return (
     <div className="product-row">
       <div className="product-thumb large">{item.name.slice(0, 2).toUpperCase()}</div>
       <div className="product-main">
         <div className="product-title">
           <b title={item.name}>{cleanProductName(item.name, 60)}</b>
-          <span className={`status ${item.mode === 'MONITOR' ? 'purple' : 'blue'}`}>{item.mode === 'MONITOR' ? 'MONITOR' : 'BUY NOW'}</span>
+          {isSavedForLater ? (
+            <span className="status orange" style={{ background: '#78350f', color: '#fde68a', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <PauseCircle size={11} /> BUY LATER
+            </span>
+          ) : (
+            <span className={`status ${item.mode === 'MONITOR' ? 'purple' : 'blue'}`}>{item.mode === 'MONITOR' ? 'MONITOR' : 'BUY NOW'}</span>
+          )}
           {item.is_gift && (
             <span className="status orange" style={{ background: '#7c2d12', color: '#fed7aa', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <Gift size={12} /> Gift {item.gift_recipient ? `for ${item.gift_recipient}` : ''}
@@ -2811,6 +2965,19 @@ function ProductRow({ item, compare, openDecisionLab, buy, monitor, onVote }: an
         </div>
       </div>
       <div className="row-actions">
+        {isSavedForLater ? (
+          onMoveToCart && (
+            <button className="secondary" title="Move back to active cart" onClick={onMoveToCart} style={{ color: '#38bdf8', borderColor: '#0284c7' }}>
+              <ShoppingCart size={13} /> Move to Cart
+            </button>
+          )
+        ) : (
+          onSaveForLater && (
+            <button className="secondary" title="Save for Later: removes from active cart" onClick={onSaveForLater} style={{ color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.4)' }}>
+              <PauseCircle size={13} /> Buy Later
+            </button>
+          )
+        )}
         {item.product_id && <button className="secondary" title="Decision Lab" onClick={openDecisionLab}><Sparkles size={13} /> Lab</button>}
         <button className="secondary" onClick={compare}>Compare</button>
         {item.mode !== 'MONITOR' && <button className="secondary" onClick={monitor}>Monitor</button>}
