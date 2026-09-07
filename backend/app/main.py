@@ -1026,14 +1026,17 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  c=product_summary(db,product_id);p=db.get(Product,product_id);best=c['best'];listings=c['listings']
  hist=[s.total for l in db.query(StoreListing).filter_by(product_id=product_id).all() for s in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()]
  current_price=best['true_total']
- dec=decision(current_price,None,hist)
+ cat = c.get('category') or (classify_product_category(p.name) if (not p.category or p.category in ('ELECTRONICS', 'General')) else p.category)
+ tracker = generate_historical_price_tracker(current_price, cat, p.name)
+ if len(hist) < 3:
+     hist = tracker['prices']
+ dec=decision(current_price,None,hist,category=cat,product_name=p.name)
  score=calculate_shopagent_score(p.__dict__,best,hist)
  regret=calculate_regret_shield(current_price,hist,best.get('seller_rating',4.0))
- simulator=simulate_buy_vs_wait(current_price,hist,product_name=p.name)
+ simulator=simulate_buy_vs_wait(current_price,hist,category=cat,product_name=p.name)
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
  skeptic=generate_second_opinion(dec['decision'],current_price,hist,p.name,pref=pref)
  why_not=generate_why_not_buy(current_price,hist,p.__dict__,pref=pref)
- cat = c.get('category') or (classify_product_category(p.name) if (not p.category or p.category in ('ELECTRONICS', 'General')) else p.category)
  ownership=calculate_ownership_cost(current_price,cat,product_name=p.name,pref=pref)
  compat=check_compatibility(p.name,p.specs or f"Category: {cat}",pref=pref)
  reviews=get_review_intelligence(p.name, cat, pref=pref)
@@ -1045,7 +1048,7 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  seller_trust={'seller':best.get('seller','Verified Store Partner'),'rating':best.get('seller_rating',4.5),'fulfillment':f'Estimated {delivery_days}-day delivery','return_satisfaction':returns_policy}
  substitutes = c.get('substitutes', [])
  sustainability = c.get('sustainability', {})
- return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'substitutes':substitutes,'sustainability':sustainability,'price_history':hist}
+ return {'product':c['product'],'product_id':product_id,'brand':c.get('brand',''),'model':c.get('model',''),'specs':p.specs or '','current_price':current_price,'best_store':best.get('store',''),'listings':listings,'decision':dec,'shopagent_score':score,'regret_shield':regret,'buy_vs_wait':simulator,'second_opinion':skeptic,'why_not_buy':why_not,'deal_truth':deal_truth,'ownership_cost':ownership,'compatibility':compat,'reviews':reviews,'seller_trust':seller_trust,'substitutes':substitutes,'sustainability':sustainability,'price_history':hist,'price_tracker':tracker}
 @app.post('/api/items/{item_id}/monitor')
 def monitor(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
  it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()

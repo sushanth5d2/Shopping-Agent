@@ -7,7 +7,8 @@ import {
   ChevronDown, ExternalLink, ShieldAlert, Zap, Layers3,
   ShoppingCart, AlertTriangle, PlayCircle, Scale, Clock3,
   Check, Menu, X, Plus, Trash2, Bell, Gift, Users, Leaf,
-  FileText, RefreshCw, ThumbsUp, ThumbsDown, CreditCard
+  FileText, RefreshCw, ThumbsUp, ThumbsDown, CreditCard,
+  CheckCircle2, AlertOctagon, LineChart, TrendingUp
 } from 'lucide-react';
 
 interface Item {
@@ -1011,6 +1012,163 @@ function TodoPage({ items, completed, compareItem, openDecisionLab, buy, startMo
   );
 }
 
+function PriceHistoryChart({ tracker, currentPrice }: { tracker: any; currentPrice: number }) {
+  if (!tracker || !tracker.timeline || tracker.timeline.length === 0) return null;
+
+  const timeline = tracker.timeline;
+  const prices = tracker.prices || timeline.map((t: any) => t.price);
+  const low = tracker.all_time_low || Math.min(...prices);
+  const high = tracker.all_time_high || Math.max(...prices);
+  const avg = tracker.average_price || Math.round(prices.reduce((a: number, b: number) => a + b, 0) / prices.length);
+  const current = currentPrice || tracker.current_price;
+  const diffVsAvg = current - avg;
+  const diffPct = tracker.diff_pct !== undefined ? tracker.diff_pct : Math.round((diffVsAvg / Math.max(avg, 1)) * 100);
+
+  // SVG Chart Dimensions
+  const svgWidth = 800;
+  const svgHeight = 220;
+  const padLeft = 60;
+  const padRight = 30;
+  const padTop = 25;
+  const padBottom = 35;
+  const chartW = svgWidth - padLeft - padRight;
+  const chartH = svgHeight - padTop - padBottom;
+
+  const minP = low * 0.96;
+  const maxP = high * 1.04;
+  const rangeP = Math.max(maxP - minP, 1);
+
+  const getY = (p: number) => padTop + chartH * (1 - (p - minP) / rangeP);
+  const getX = (idx: number) => padLeft + (idx / Math.max(timeline.length - 1, 1)) * chartW;
+
+  const points = timeline.map((pt: any, i: number) => ({
+    x: getX(i),
+    y: getY(pt.price),
+    ...pt
+  }));
+
+  const pathD = points.reduce((acc: string, pt: any, i: number) => {
+    return `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`;
+  }, '');
+
+  const areaD = `${pathD} L ${points[points.length - 1].x} ${padTop + chartH} L ${points[0].x} ${padTop + chartH} Z`;
+
+  const yLow = getY(low);
+  const yAvg = getY(avg);
+  const yHigh = getY(high);
+
+  return (
+    <div className="panel" style={{ borderColor: '#3b82f6', overflow: 'hidden' }}>
+      <div className="panel-head">
+        <div>
+          <span className="eyebrow" style={{ color: '#60a5fa' }}>90-DAY PRICE HISTORY &amp; BENCHMARKS</span>
+          <h3>Price History &amp; Trend Graph</h3>
+        </div>
+        <span className="status blue" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Activity size={13} /> 90 Days Tracked
+        </span>
+      </div>
+
+      {/* 4 Quick Stat Cards */}
+      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', marginBottom: 18 }}>
+        <div className="price-stat-pill" style={{ borderLeft: '4px solid #10b981' }}>
+          <span>All-Time Recorded Low</span>
+          <strong style={{ color: '#34d399' }}>₹{Number(low).toLocaleString()}</strong>
+        </div>
+        <div className="price-stat-pill" style={{ borderLeft: '4px solid #3b82f6' }}>
+          <span>90-Day Fair Average</span>
+          <strong style={{ color: '#60a5fa' }}>₹{Number(avg).toLocaleString()}</strong>
+        </div>
+        <div className="price-stat-pill" style={{ borderLeft: '4px solid #f43f5e' }}>
+          <span>Highest Recorded Peak</span>
+          <strong style={{ color: '#fb7185' }}>₹{Number(high).toLocaleString()}</strong>
+        </div>
+        <div className="price-stat-pill" style={{ borderLeft: `4px solid ${diffVsAvg <= 0 ? '#10b981' : '#f59e0b'}` }}>
+          <span>Live vs 90-Day Avg</span>
+          <strong style={{ color: diffVsAvg <= 0 ? '#34d399' : '#fbbf24' }}>
+            {diffVsAvg <= 0 ? `-₹${Math.abs(diffVsAvg).toLocaleString()} (${Math.abs(diffPct)}% below)` : `+₹${diffVsAvg.toLocaleString()} (${diffPct}% above)`}
+          </strong>
+        </div>
+      </div>
+
+      {/* SVG Interactive Timeline */}
+      <div className="price-history-container" style={{ padding: 12 }}>
+        <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+          <defs>
+            <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* Reference Line: Highest */}
+          <line x1={padLeft} y1={yHigh} x2={svgWidth - padRight} y2={yHigh} stroke="#f43f5e" strokeDasharray="4 4" strokeOpacity="0.5" strokeWidth="1" />
+          <text x={padLeft + 6} y={yHigh - 6} fill="#fb7185" fontSize="10" fontWeight="600">PEAK ₹{Number(high).toLocaleString()}</text>
+
+          {/* Reference Line: Average */}
+          <line x1={padLeft} y1={yAvg} x2={svgWidth - padRight} y2={yAvg} stroke="#3b82f6" strokeDasharray="4 4" strokeOpacity="0.5" strokeWidth="1" />
+          <text x={padLeft + 6} y={yAvg - 6} fill="#60a5fa" fontSize="10" fontWeight="600">90-DAY AVG ₹{Number(avg).toLocaleString()}</text>
+
+          {/* Reference Line: Lowest */}
+          <line x1={padLeft} y1={yLow} x2={svgWidth - padRight} y2={yLow} stroke="#10b981" strokeDasharray="4 4" strokeOpacity="0.6" strokeWidth="1.2" />
+          <text x={padLeft + 6} y={yLow - 6} fill="#34d399" fontSize="10" fontWeight="700">LOW ₹{Number(low).toLocaleString()}</text>
+
+          {/* Area Fill */}
+          <path d={areaD} fill="url(#priceGradient)" />
+
+          {/* Main Line */}
+          <path d={pathD} fill="none" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Data Points */}
+          {points.map((pt: any, i: number) => {
+            const isLatest = i === points.length - 1;
+            const isLowest = pt.price === low;
+            return (
+              <g key={i}>
+                {isLatest && (
+                  <circle cx={pt.x} cy={pt.y} r="8" fill="none" stroke="#22c55e" strokeWidth="1.5" opacity="0.7">
+                    <animate attributeName="r" values="6;11;6" dur="2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.8;0;0.8" dur="2s" repeatCount="indefinite" />
+                  </circle>
+                )}
+                <circle
+                  cx={pt.x}
+                  cy={pt.y}
+                  r={isLatest ? 5 : isLowest ? 4.5 : 3.5}
+                  fill={isLatest ? '#22c55e' : isLowest ? '#34d399' : '#818cf8'}
+                  stroke="#0f172a"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x={pt.x}
+                  y={padTop + chartH + 18}
+                  fill="#94a3b8"
+                  fontSize="9.5"
+                  textAnchor="middle"
+                >
+                  {pt.days_ago === 0 ? 'Live' : `${pt.days_ago}d`}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Milestone event badges */}
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', padding: '12px 4px 4px', marginTop: 8 }}>
+        {timeline.map((m: any, i: number) => (
+          <div key={i} style={{ minWidth: 140, flex: '0 0 auto', background: '#0b1329', border: '1px solid #1e293b', borderRadius: 8, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#60a5fa', fontWeight: 600 }}>{m.days_ago === 0 ? 'Today (Live)' : `${m.days_ago} days ago`}</div>
+            <div style={{ fontSize: 12, color: '#fff', fontWeight: 700, margin: '2px 0' }}>₹{Number(m.price).toLocaleString()}</div>
+            <div style={{ fontSize: 10, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.event}</div>
+            <div style={{ fontSize: 9, color: '#64748b' }}>{m.store}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, onRefresh, refreshing }: any) {
   const productItems = items.filter((x: any) => x.product_id);
   const activePid = selectedPid || (data && data.product_id) || (productItems[0]?.product_id);
@@ -1088,16 +1246,76 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
         </div>
       </div>
 
+      {/* Hero Primary Verdict Card */}
+      {(() => {
+        const dec = data.decision || {};
+        const isBuy = dec.decision === 'BUY';
+        const isDont = dec.decision === "DON'T BUY";
+        const verdictType = isBuy ? 'buy' : isDont ? 'dont' : 'wait';
+        const verdictTitle = dec.verdict || (isBuy ? 'BUY NOW' : isDont ? "DON'T BUY (OVERPRICED)" : 'WAIT FOR PRICE DROP');
+        const confidence = dec.confidence || 85;
+        const fairPrice = dec.fair_price || data.price_tracker?.average_price || data.current_price;
+        const savingsVsAvg = dec.savings_vs_avg;
+
+        return (
+          <div className={`verdict-hero-card ${verdictType}`}>
+            <div className="verdict-header-row">
+              <div>
+                <span className="eyebrow" style={{ color: isBuy ? '#34d399' : isDont ? '#f87171' : '#fbbf24', letterSpacing: '0.1em' }}>
+                  PRIMARY ALGORITHMIC VERDICT
+                </span>
+                <h1 style={{ fontSize: 26, fontWeight: 900, color: '#fff', margin: '6px 0 8px', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  {verdictTitle}
+                  <span className={`verdict-badge-pill ${verdictType}`}>
+                    {dec.decision} VERDICT
+                  </span>
+                </h1>
+                <p style={{ fontSize: 14, color: '#cbd5e1', maxWidth: 850, lineHeight: 1.6, margin: 0 }}>
+                  {dec.reason}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '8px 16px', textAlign: 'center' }}>
+                  <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Confidence</span>
+                  <b style={{ fontSize: 18, color: isBuy ? '#34d399' : isDont ? '#f87171' : '#fbbf24' }}>{confidence}%</b>
+                </div>
+                {fairPrice && (
+                  <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '8px 16px', textAlign: 'center' }}>
+                    <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Fair Baseline</span>
+                    <b style={{ fontSize: 18, color: '#e2e8f0' }}>₹{Number(fairPrice).toLocaleString()}</b>
+                  </div>
+                )}
+                {savingsVsAvg !== undefined && savingsVsAvg > 0 && (
+                  <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10b981', borderRadius: 12, padding: '8px 16px', textAlign: 'center' }}>
+                    <span style={{ display: 'block', fontSize: 11, color: '#34d399', textTransform: 'uppercase', fontWeight: 600 }}>Savings vs Avg</span>
+                    <b style={{ fontSize: 18, color: '#34d399' }}>₹{Number(savingsVsAvg).toLocaleString()}</b>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {dec.action && (
+              <div className="verdict-action-box">
+                <div style={{ background: isBuy ? 'rgba(16,185,129,0.2)' : isDont ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)', borderRadius: 8, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isBuy ? <CheckCircle2 size={18} color="#34d399" /> : isDont ? <AlertOctagon size={18} color="#f87171" /> : <Clock3 size={18} color="#fbbf24" />}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <b style={{ fontSize: 12, color: isBuy ? '#34d399' : isDont ? '#f87171' : '#fbbf24', letterSpacing: '0.05em', display: 'block', marginBottom: 2 }}>RECOMMENDED ACTION</b>
+                  <span style={{ fontSize: 13, color: '#e2e8f0', lineHeight: 1.5 }}>{dec.action}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="dashboard-grid">
         <div className="panel">
           <div className="panel-head">
-            <div><span className="eyebrow">PRIMARY RECOMMENDATION</span><h3>{data.decision?.decision}</h3></div>
-            <span className={`decision ${data.decision?.decision === 'BUY' ? 'buy' : data.decision?.decision === "DON'T BUY" ? 'dont' : 'wait'}`}>
-              {data.decision?.decision} VERDICT
-            </span>
+            <div><span className="eyebrow">RISK &amp; TRUST RADAR</span><h3>ShopAgent Score &amp; Regret Shield</h3></div>
+            <span className="status green">{score.grade || 'GRADED'}</span>
           </div>
-          <p style={{ fontSize: 14, color: '#e2e8f0', margin: '4px 0 16px' }}>{data.decision?.reason}</p>
-          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginTop: 8 }}>
             <div className="stat-card">
               <div>
                 <span>ShopAgent Score</span>
@@ -1132,6 +1350,9 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
           </ul>
         </div>
       </div>
+
+      {/* 90-Day Price History Graph & Trend Analysis */}
+      <PriceHistoryChart tracker={data.price_tracker} currentPrice={data.current_price} />
 
       <div className="panel">
         <div className="panel-head">
@@ -1245,13 +1466,31 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
                   <b style={{ display: 'block', fontSize: 13, color: '#fff', margin: '4px 0' }}>{cr.title}</b>
                   <p style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5, margin: '6px 0 10px' }}>{cr.review}</p>
                   {cr.pros && cr.pros.length > 0 && (
-                    <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <ThumbsUp size={12} /> <b>Pros:</b> {cr.pros.join(', ')}
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <ThumbsUp size={12} /> PROS:
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {cr.pros.map((p: string, pIdx: number) => (
+                          <span key={pIdx} className="review-pro-tag">
+                            ✓ {p}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {cr.cons && cr.cons.length > 0 && (
-                    <div style={{ fontSize: 11, color: '#f87171', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <ThumbsDown size={12} /> <b>Cons:</b> {cr.cons.join(', ')}
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11, color: '#f87171', fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <ThumbsDown size={12} /> CONS:
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {cr.cons.map((c: string, cIdx: number) => (
+                          <span key={cIdx} className="review-con-tag">
+                            ✕ {c}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
