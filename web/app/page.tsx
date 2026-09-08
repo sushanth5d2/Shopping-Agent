@@ -312,7 +312,7 @@ export default function App() {
           if (inFlightUrl) {
             setProductUrlState(inFlightUrl);
             setUrlBusy(true);
-            analyzeUrl(false, inFlightUrl);
+            analyzeUrl('compare', inFlightUrl);
           }
         } catch {
           localStorage.removeItem('sa_access');
@@ -367,9 +367,10 @@ export default function App() {
     }
   };
 
-  const analyzeUrl = async (monitor = false, urlOverride?: string) => {
+  const analyzeUrl = async (mode: 'compare' | 'buy' | 'monitor' | 'all' = 'compare', urlOverride?: string) => {
     const targetUrl = (urlOverride || productUrl).trim();
     if (!targetUrl) return;
+    const isMonitor = mode === 'monitor' || mode === 'all';
     setUrlBusy(true);
     if (typeof window !== 'undefined') {
       try { localStorage.setItem('sa_extracting_url', targetUrl); } catch {}
@@ -377,7 +378,7 @@ export default function App() {
     try {
       const x = await req('/api/products/url-analyze', {
         method: 'POST',
-        body: JSON.stringify({ url: targetUrl, monitor })
+        body: JSON.stringify({ url: targetUrl, monitor: isMonitor })
       });
       if (x.product && x.product.id) {
         setDecisionPid(x.product.id);
@@ -386,7 +387,6 @@ export default function App() {
         }
       }
       setCompare(x.comparison);
-      setTab('Compare');
       setProductUrl('');
       if (typeof window !== 'undefined') {
         try {
@@ -395,7 +395,24 @@ export default function App() {
         } catch {}
       }
       await load();
-      setToast(monitor ? 'Product analyzed, compared, and 24/7 monitoring started' : 'Product analyzed and compared across live stores');
+
+      if (mode === 'buy' || mode === 'all') {
+        if (x.item_id) {
+          await buy(x.item_id);
+        }
+        if (mode === 'buy') {
+          setTab('To-Buy');
+        } else {
+          setTab('Compare');
+        }
+        setToast(mode === 'all' ? 'Product analyzed, checkout opened, and 24/7 monitoring started!' : 'Product analyzed and checkout initiated!');
+      } else if (mode === 'monitor') {
+        setTab('Monitoring');
+        setToast('Product analyzed and 24/7 price monitoring started!');
+      } else {
+        setTab('Compare');
+        setToast('Product analyzed and compared across live stores');
+      }
     } catch (e: any) {
       setToast(e.message);
       if (typeof window !== 'undefined') {
@@ -443,7 +460,7 @@ export default function App() {
     if (text.startsWith('http://') || text.startsWith('https://')) {
       setProductUrl(text);
       setInput('');
-      await analyzeUrl(false, text);
+      await analyzeUrl('compare', text);
       return;
     }
     setBusy(true);
@@ -969,11 +986,13 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
               </div>
               <span className="url-badge">LIVE EXTRACTOR</span>
             </div>
-            <div className="url-command">
+            <div className="url-command" style={{ flexWrap: 'wrap', gap: 6 }}>
               <span>↗</span>
-              <input value={productUrl} onChange={e => setProductUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyzeUrl(false)} placeholder="https://amazon.in/dp/... or https://store.com/product/..." />
-              <button onClick={() => analyzeUrl(false)} disabled={urlBusy}>{urlBusy ? 'Extracting…' : 'Compare'}</button>
-              <button className="url-monitor" onClick={() => analyzeUrl(true)} disabled={urlBusy}>Compare + Monitor</button>
+              <input value={productUrl} onChange={e => setProductUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyzeUrl('compare')} placeholder="https://amazon.in/dp/... or https://store.com/product/..." style={{ flex: '1 1 240px' }} />
+              <button style={{ background: '#2563eb', color: '#fff' }} onClick={() => analyzeUrl('buy')} disabled={urlBusy}>{urlBusy ? 'Extracting…' : '⚡ Buy Now'}</button>
+              <button onClick={() => analyzeUrl('compare')} disabled={urlBusy}>{urlBusy ? 'Extracting…' : '🔍 Compare'}</button>
+              <button style={{ background: '#475569', color: '#f1f5f9' }} onClick={() => analyzeUrl('monitor')} disabled={urlBusy}>{urlBusy ? 'Extracting…' : '🔔 Monitor'}</button>
+              <button className="url-monitor" onClick={() => analyzeUrl('all')} disabled={urlBusy}>{urlBusy ? 'Extracting…' : '⚡ Buy + Compare + Monitor'}</button>
             </div>
             {urlBusy && (
               <div style={{
