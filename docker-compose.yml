@@ -13,14 +13,9 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - shopagent_pg:/var/lib/postgresql/data
-    networks:
-      shopagent_net:
-        aliases:
-          - db
-          - shopagent-db
-          - postgres
+    network_mode: "host"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U shopagent -d shopagent"]
+      test: ["CMD-SHELL", "pg_isready -U shopagent -d shopagent -h 127.0.0.1"]
       interval: 2s
       timeout: 3s
       retries: 20
@@ -37,7 +32,7 @@ services:
     image: shopagent-backend:latest
     container_name: shopagent-backend
     environment:
-      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@127.0.0.1:5432/shopagent
       SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
       SHOPAGENT_CORS_ORIGINS: "*"
       SHOPAGENT_AI_API_BASE_URL: ${SHOPAGENT_AI_API_BASE_URL:-}
@@ -52,11 +47,8 @@ services:
       SHOPAGENT_ALLOW_DEMO_SEED: "true"
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
-    ports:
-      - "${SHOPAGENT_API_PORT:-8000}:8000"
     shm_size: '1gb'
-    networks:
-      - shopagent_net
+    network_mode: "host"
     depends_on:
       db:
         condition: service_healthy
@@ -73,14 +65,13 @@ services:
     container_name: shopagent-worker
     command: ["python", "-m", "app.monitor_worker"]
     environment:
-      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@127.0.0.1:5432/shopagent
       SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
       SHOPAGENT_PLAYWRIGHT_HEADLESS: ${SHOPAGENT_PLAYWRIGHT_HEADLESS:-true}
     shm_size: '1gb'
-    networks:
-      - shopagent_net
+    network_mode: "host"
     depends_on:
       db:
         condition: service_healthy
@@ -98,20 +89,13 @@ services:
     image: shopagent-web:latest
     container_name: shopagent-web
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      BACKEND_INTERNAL_URL: http://backend:8000
-    ports:
-      - "${SHOPAGENT_WEB_PORT:-3000}:3000"
-    networks:
-      - shopagent_net
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+      BACKEND_INTERNAL_URL: http://127.0.0.1:8000
+    network_mode: "host"
     depends_on:
       backend:
         condition: service_started
     restart: unless-stopped
-
-networks:
-  shopagent_net:
-    driver: bridge
 
 volumes:
   shopagent_pg:
