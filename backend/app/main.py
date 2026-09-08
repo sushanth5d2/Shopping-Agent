@@ -912,17 +912,17 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
    db.commit()
    return {'item_id':item.id,'product':{'id':product.id,'name':product.name,'brand':product.brand,'model':product.model,'variant':product.variant,'gtin':product.gtin},'source':{'url':p.url,'price':existing_l.price,'true_total':existing_l.price},'comparison':product_summary(db,product.id),'monitoring':p.monitor}
 
-  try:
-   validate_public_url(p.url)
-   source=connector_for(p.url).observe_url(p.url)
-  except Exception as exc:
-   clean_name = parse_name_from_url(p.url)
-   if not clean_name or clean_name == 'Product Online':
-    raise HTTPException(status_code=502, detail=f"Failed to extract product from {p.url}: {exc}")
-   source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
+ try:
+  validate_public_url(p.url)
+  source=connector_for(p.url).observe_url(p.url)
+ except Exception as exc:
+  clean_name = parse_name_from_url(p.url)
+  if not clean_name or clean_name == 'Product Online':
+   raise HTTPException(status_code=502, detail=f"Failed to extract product from {p.url}: {exc}")
+  source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
 
-  if not source or not source.name or source.name == 'Product Online':
-   raise HTTPException(status_code=502, detail=f"Could not extract genuine product details from {p.url}. The retailer page may be unreachable or protected.")
+ if not source or not source.name or source.name == 'Product Online' or source.price <= 0:
+  raise HTTPException(status_code=502, detail=f"Could not extract genuine product details from {p.url}. The retailer page may be unreachable or protected.")
 
  # Find or generate cross-store comparison listings for this genuine product
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
