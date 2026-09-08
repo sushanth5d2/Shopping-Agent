@@ -149,6 +149,27 @@ def auto_migrate_schema(eng):
                 except Exception:
                     pass
 
+def cleanup_corrupted_data(eng):
+    """Purges any corrupted or bot-blocked fallback items from previous runs."""
+    from sqlalchemy import text
+    cleanup_stmts = [
+        "DELETE FROM shopping_items WHERE name LIKE '%患者向医薬品ガイド%' OR name = 'Product Online';",
+        "DELETE FROM products WHERE name LIKE '%患者向医薬品ガイド%' OR name = 'Product Online';",
+        "DELETE FROM stores WHERE name LIKE '%医薬品医療機器総合機構%' OR name LIKE '%患者向医薬品ガイド%';",
+        "DELETE FROM store_listings WHERE product_id NOT IN (SELECT id FROM products);",
+        "DELETE FROM monitoring_tasks WHERE item_id NOT IN (SELECT id FROM shopping_items);",
+    ]
+    with eng.connect() as conn:
+        for stmt in cleanup_stmts:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
 def init_db():
     """Waits for DB connection, binds engine, creates tables and performs auto-migration."""
     global engine, SessionLocal
@@ -156,6 +177,7 @@ def init_db():
         from app import models  # Register all models with Base.metadata
         Base.metadata.create_all(bind=engine)
         auto_migrate_schema(engine)
+        cleanup_corrupted_data(engine)
         logger.info("All database tables verified, migrated, and created successfully.")
         print("INFO: All database tables verified, migrated, and created successfully.", flush=True)
         return True

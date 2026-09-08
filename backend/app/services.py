@@ -7,8 +7,12 @@ import httpx
 
 def normalize_price(v):
     if isinstance(v, (int, float)): return float(v)
-    s = re.sub(r'[^0-9.,-]', '', str(v)).replace(',', '')
-    return float(s)
+    if not v: return 0.0
+    s = re.sub(r'[^0-9.]', '', str(v)).replace(',', '')
+    try:
+        return float(s) if s else 0.0
+    except Exception:
+        return 0.0
 
 def canonical_store_name(raw: str) -> str:
     r = (raw or '').lower()
@@ -558,13 +562,13 @@ def classify_product_category(name: str) -> str:
     arch = extract_product_archetype(name)
     return arch.get('product_type') or 'General Merchandise'
 
-def duckduckgo_search(query: str, timeout: int = 5) -> list[dict]:
-    """Universal web search helper querying Bing Search (with automatic base64 URL unwrapping)
-    and falling back to DuckDuckGo. Returns structured results with title, url, snippet, price."""
+def duckduckgo_search(query: str, timeout: int = 6) -> list[dict]:
+    """Universal web search helper querying DuckDuckGo Lite (India region) and Bing Search.
+    Returns structured results with title, url, snippet, price, strictly filtered for Indian e-commerce."""
     import re
     import base64
     from bs4 import BeautifulSoup
-    from urllib.parse import urlparse, parse_qs
+    from urllib.parse import urlparse, parse_qs, quote_plus
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -573,31 +577,78 @@ def duckduckgo_search(query: str, timeout: int = 5) -> list[dict]:
     }
     results = []
 
-    # 1. Primary: Bing Search (ultra-reliable, fast HTTP 200, no CAPTCHA)
+    # 1. Primary: DuckDuckGo Lite with India English (kl=in-en)
     try:
-        r = httpx.get(f'https://www.bing.com/search?q={query}', headers=headers, timeout=timeout)
-        if r.status_code == 200:
+        r = httpx.post('https://lite.duckduckgo.com/lite/', headers=headers, data={'q': query, 'kl': 'in-en'}, timeout=timeout)
+        if r.status_code == 200 and ('result-link' in r.text or 'result-snippet' in r.text):
             soup = BeautifulSoup(r.text, 'html.parser')
-            for li in soup.select('li.b_algo'):
-                h2 = li.select_one('h2 a')
-                snippet_el = li.select_one('.b_caption p') or li.select_one('.b_algoSlug')
-                if not h2:
-                    continue
-                title = h2.get_text().strip()
-                raw_href = h2.get('href', '')
+            links = soup.select('.result-link')
+            snippets = soup.select('.result-snippet')
+            for i, link in enumerate(links):
+                title = link.get_text().strip()
+                raw_href = link.get('href', '')
                 actual_url = raw_href
-                if 'bing.com/ck/a' in raw_href:
-                    try:
-                        u_param = parse_qs(urlparse(raw_href).query).get('u', [''])[0]
-                        if u_param.startswith('a1'):
-                            b64 = u_param[2:].replace('-', '+').replace('_', '/')
-                            b64 += '=' * (-len(b64) % 4)
-                            actual_url = base64.b64decode(b64).decode('latin1', errors='ignore')
-                    except Exception:
-                        pass
-                snippet = snippet_el.get_text().strip() if snippet_el else ''
-                if title and not any(k in title.lower() for k in ['microsoft bing', 'sign in', 'feedback', 'preferences']):
-                    pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet)
+                if 'uddg=' in raw_href:
+                    parsed = urlparse(raw_href)
+                    qs = parse_qs(parsed.query)
+                    actual_url = qs.get('uddg', [raw_href])[0]
+                elif raw_href.startswith('//'):
+                    actual_url = 'https:' + raw_href
+
+                snippet = snippets[i].get_text().strip() if i < len(snippets) else ''
+                # Filter out ads and non-product noise
+                if any(ad in actual_url.lower() for ad in ['ad_domain', 'bing.com/aclick', 'duckduckgo.com/y.js', 'doubleclick', 'syndication']):
+                    continue
+                if any(k in title.lower() for k in ['duckduckgo', 'ad clicks', 'more info', 'help-pages']):
+                    continue
+                # Reject foreign character sets (Japanese, Chinese, Russian, etc.)
+                if re.search(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\u0400-\u04ff]', title + snippet):
+                    continue
+
+                pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet + ' ' + title)
+                price = float(pm.group(1).replace(',', '')) if pm else 0.0
+                results.append({
+                    'title': title,
+                    'url': actual_url,
+                    'snippet': snippet,
+                    'price': price
+                })
+    except Exception:
+        pass
+
+    # 2. Secondary Fallback: Bing Search (with India query params & URL encoding)
+    if not results:
+        try:
+            q_enc = quote_plus(query)
+            r = httpx.get(f'https://www.bing.com/search?q={q_enc}&cc=IN&setlang=en-IN&ensearch=1', headers=headers, timeout=timeout)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for li in soup.select('li.b_algo'):
+                    h2 = li.select_one('h2 a')
+                    snippet_el = li.select_one('.b_caption p') or li.select_one('.b_algoSlug')
+                    if not h2:
+                        continue
+                    title = h2.get_text().strip()
+                    raw_href = h2.get('href', '')
+                    actual_url = raw_href
+                    if 'bing.com/ck/a' in raw_href:
+                        try:
+                            u_param = parse_qs(urlparse(raw_href).query).get('u', [''])[0]
+                            if u_param.startswith('a1'):
+                                b64 = u_param[2:].replace('-', '+').replace('_', '/')
+                                b64 += '=' * (-len(b64) % 4)
+                                actual_url = base64.b64decode(b64).decode('latin1', errors='ignore')
+                        except Exception:
+                            pass
+                    snippet = snippet_el.get_text().strip() if snippet_el else ''
+                    if any(ad in actual_url.lower() for ad in ['ad_domain', 'bing.com/aclick', 'doubleclick']):
+                        continue
+                    if any(k in title.lower() for k in ['microsoft bing', 'sign in', 'feedback', 'preferences', 'dosa guru', 'restaurant guru', 'forum']):
+                        continue
+                    if re.search(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\u0400-\u04ff]', title + snippet):
+                        continue
+
+                    pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet + ' ' + title)
                     price = float(pm.group(1).replace(',', '')) if pm else 0.0
                     results.append({
                         'title': title,
@@ -605,38 +656,6 @@ def duckduckgo_search(query: str, timeout: int = 5) -> list[dict]:
                         'snippet': snippet,
                         'price': price
                     })
-    except Exception:
-        pass
-
-    # 2. Fallback: DuckDuckGo Lite
-    if not results:
-        try:
-            r = httpx.post('https://lite.duckduckgo.com/lite/', headers=headers, data={'q': query}, timeout=timeout)
-            if r.status_code == 200 and ('result-link' in r.text or 'result-snippet' in r.text):
-                soup = BeautifulSoup(r.text, 'html.parser')
-                links = soup.select('.result-link')
-                snippets = soup.select('.result-snippet')
-                for i, link in enumerate(links):
-                    title = link.get_text().strip()
-                    raw_href = link.get('href', '')
-                    actual_url = raw_href
-                    if 'uddg=' in raw_href:
-                        parsed = urlparse(raw_href)
-                        qs = parse_qs(parsed.query)
-                        actual_url = qs.get('uddg', [raw_href])[0]
-                    elif raw_href.startswith('//'):
-                        actual_url = 'https:' + raw_href
-
-                    snippet = snippets[i].get_text().strip() if i < len(snippets) else ''
-                    if title and not any(k in title.lower() for k in ['duckduckgo', 'ad clicks', 'more info']):
-                        pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', snippet)
-                        price = float(pm.group(1).replace(',', '')) if pm else 0.0
-                        results.append({
-                            'title': title,
-                            'url': actual_url,
-                            'snippet': snippet,
-                            'price': price
-                        })
         except Exception:
             pass
 
@@ -694,16 +713,16 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
     if 'pixel 9' in nl: return 69999.0
 
     # Electronics spec-aware estimation (phones with 12GB RAM, 512GB storage, snapdragon, 200mp, etc.)
-    if category == 'ELECTRONICS':
-        is_high_spec = any(k in nl for k in ['512gb', '1tb', 'snapdragon 8', '200mp', 'ultra 5g', 'pro max'])
-        is_mid_spec = any(k in nl for k in ['256gb', '128gb', '12gb ram', '8gb ram', 'amoled', 'snapdragon', '5g'])
+    if category in ['ELECTRONICS', 'SMARTPHONE', 'HYBRID_TECH']:
+        is_high_spec = any(k in nl for k in ['512gb', '1tb', 'snapdragon 8', '200mp', 'ultra 5g', 'ultra', 'pro max', 'titanium', 'galaxy s', 'fold', 'flip'])
+        is_mid_spec = any(k in nl for k in ['256gb', '128gb', '12gb ram', '8gb ram', 'amoled', 'snapdragon', '5g', 'smartphone', 'mobile'])
         if is_high_spec: return 108499.0
-        if is_mid_spec: return 45000.0
+        if is_mid_spec: return 38000.0
         if any(k in nl for k in ['laptop', 'macbook', 'notebook', 'thinkpad']): return 65000.0
         if any(k in nl for k in ['tv', 'television', 'oled', 'qled']): return 45000.0
         if any(k in nl for k in ['watch', 'smartwatch']): return 15000.0
         if any(k in nl for k in ['earbuds', 'headphone', 'airpods']): return 8000.0
-        return 5000.0
+        return 12000.0
     if category == 'HEALTH': return 300.0
     if category == 'FASHION': return 800.0
     return 1000.0

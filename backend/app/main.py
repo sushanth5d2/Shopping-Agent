@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel,Field,EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy import select,func
-from .db import get_db,Base,engine,SessionLocal
+from .db import get_db,Base,engine,SessionLocal,cleanup_corrupted_data
 from .models import *
 from .config import settings
 from .security import *
@@ -881,7 +881,7 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
 
  if existing_l and existing_l.price > 0 and existing_l.observed_at and (datetime.now(timezone.utc) - (existing_l.observed_at.replace(tzinfo=timezone.utc) if existing_l.observed_at.tzinfo is None else existing_l.observed_at) < timedelta(hours=2)):
   product = db.get(Product, existing_l.product_id)
-  if product:
+  if product and product.name and not re.search(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]', product.name) and product.name != 'Product Online':
    sl=user_list(db,u)
    item = db.query(ShoppingItem).filter_by(list_id=sl.id, product_id=product.id).first()
    target_p = p.target_price
@@ -1005,6 +1005,11 @@ def ingest_url(p:UrlIn,u=Depends(current_user),db:Session=Depends(get_db)):
   host=__import__('urllib.parse',fromlist=['urlparse']).urlparse(p.url).netloc;store=Store(name=host,base_url=host,price_supported=True,search_supported=False,stock_supported=True,checkout_supported=False);db.add(store);db.flush()
  seller=Seller(store_id=store.id,name=obs.seller or 'Unknown',rating=obs.seller_rating);db.add(seller);db.flush()
  l=StoreListing(product_id=existing.id,store_id=store.id,seller_id=seller.id,url=p.url,currency=obs.currency,price=obs.price,delivery=obs.delivery,tax=obs.tax,fees=obs.fees,coupon=obs.coupon,cashback=obs.cashback,stock=obs.stock,delivery_days=obs.delivery_days,warranty=obs.warranty,returns=obs.returns,condition=obs.condition);db.add(l);db.flush();db.add(PriceSnapshot(listing_id=l.id,price=obs.price,delivery=obs.delivery,total=true_total(obs.price,obs.delivery,obs.tax,obs.fees,obs.coupon,obs.cashback),stock=obs.stock,seller=obs.seller));db.commit();return {'product':{'id':existing.id,'name':existing.name},'listing':product_summary(db,existing.id)['best']}
+
+@app.post('/api/products/cleanup')
+def cleanup_products(u=Depends(current_user), db: Session=Depends(get_db)):
+    cleanup_corrupted_data(db.get_bind())
+    return {'ok': True, 'message': 'Corrupted product entries purged.'}
 @app.get('/api/products/{product_id}')
 @app.get('/api/products/{product_id}/summary')
 def get_product(product_id:int,u=Depends(current_user),db:Session=Depends(get_db)):

@@ -95,11 +95,22 @@ class BrowserAgent:
                 timezone_id='Asia/Kolkata',
             )
 
-            # Mask navigator.webdriver
+            # Mask navigator.webdriver and configure realistic navigator properties
             context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                window.chrome = { runtime: {} };
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-GB', 'en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                window.chrome = { runtime: {}, app: {} };
             """)
+
+            # Add Indian locale & preference cookies
+            try:
+                context.add_cookies([
+                    {'name': 'i18n-prefs', 'value': 'INR', 'domain': '.amazon.in', 'path': '/'},
+                    {'name': 'lc-acbin', 'value': 'en_IN', 'domain': '.amazon.in', 'path': '/'},
+                ])
+            except Exception:
+                pass
 
             page = context.new_page()
 
@@ -330,8 +341,8 @@ class BrowserAgent:
             ]
             for store_name, domain, search_url, price_selector in competitors_to_check:
                 try:
-                    page.goto(search_url, wait_until='domcontentloaded', timeout=1800)
-                    page.wait_for_timeout(100)
+                    page.goto(search_url, wait_until='domcontentloaded', timeout=4500)
+                    page.wait_for_timeout(200)
                     s_soup = BeautifulSoup(page.content(), 'html.parser')
                     s_price_el = s_soup.select_one(price_selector)
                     if s_price_el:

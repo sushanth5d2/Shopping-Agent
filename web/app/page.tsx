@@ -247,13 +247,26 @@ export default function App() {
       const savedPid = typeof window !== 'undefined' ? localStorage.getItem('sa_decision_pid') : null;
       let targetPid = savedPid ? Number(savedPid) : null;
       const itemsWithPid = (i.items || []).filter((it: any) => it.product_id);
+      if (targetPid && itemsWithPid.length > 0 && !itemsWithPid.some((it: any) => it.product_id === targetPid)) {
+        targetPid = null;
+        try { localStorage.removeItem('sa_decision_pid'); } catch {}
+      }
       if (!targetPid && itemsWithPid.length > 0) {
-        targetPid = itemsWithPid[itemsWithPid.length - 1].product_id;
+        targetPid = itemsWithPid[0].product_id;
       }
       if (targetPid) {
         setDecisionPid(targetPid);
         const dLab = await req(`/api/products/${targetPid}/decision-lab?t=${Date.now()}`).catch(() => null);
-        if (dLab) setDecisionData(dLab);
+        if (dLab && dLab.product_name && !/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(dLab.product_name)) {
+          setDecisionData(dLab);
+        } else {
+          setDecisionData(null);
+          setDecisionPid(null);
+          try { localStorage.removeItem('sa_decision_pid'); } catch {}
+        }
+      } else {
+        setDecisionPid(null);
+        setDecisionData(null);
       }
     } catch (err: any) {
       if (!localStorage.getItem('sa_access') || err.message?.includes('Session expired')) {
