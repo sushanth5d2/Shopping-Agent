@@ -3696,7 +3696,9 @@ def _inbuilt_ai_inference(prompt: str) -> str:
         p_low = prompt.lower()
         pm = _re.search(r'Current Price:\s*₹?([\d,]+(?:\.\d+)?)', prompt)
         cp = float(pm.group(1).replace(',', '')) if pm else 2500.0
-        p_dom = detect_product_domain(prompt)
+        p_name_match = _re.search(r'alternative products to ["\']([^"\']+)["\']', prompt, _re.I)
+        raw_name = p_name_match.group(1).strip() if p_name_match else _re.sub(r'[\"\']', '', prompt)[:35].strip()
+        p_dom = detect_product_domain(raw_name) or detect_product_domain(prompt)
 
         if p_dom == 'LAPTOP' or is_laptop_product(prompt):
             return _json.dumps([
@@ -3995,11 +3997,39 @@ def _inbuilt_ai_inference(prompt: str) -> str:
                 {"name": "Classmate Pulse Hardcover Archival Notebook (Set of 3)", "brand": "Classmate", "specs": "300 Pages, 80 GSM Elemental Chlorine Free Paper, Acid-Free Archival Sheets, Sturdy Binding", "price": p2, "type": "STUDENT & DESK VALUE", "reason": "Thick 80 GSM bleed-resistant paper suitable for ballpoint and gel pen notes."},
                 {"name": "Lamy Safari Fine Nib Fountain Pen Edition", "brand": "Lamy", "specs": "Sturdy ABS Plastic, Ergonomic Grip Section, Chrome-Plated Steel Nib, Made in Germany", "price": p3, "type": "GERMAN CALLIGRAPHY LEADER", "reason": "Ergonomic triangular grip section designed to promote fatigue-free long writing sessions."}
             ])
+        elif p_dom == 'GROCERY' or classify_product_category(raw_name) == 'GROCERY' or any(k in raw_name.lower() for k in ['bread', 'milk', 'egg', 'tomato', 'potato', 'potatos', 'onion', 'rice', 'dal', 'oil', 'jam', 'almond', 'badam', 'atta', 'flour', 'butter', 'paneer', 'cheese', 'tea', 'coffee']):
+            rn_low = raw_name.lower()
+            if 'bread' in rn_low:
+                return _json.dumps([
+                    {"name": "Britannia 100% Whole Wheat Bread (400g)", "brand": "Britannia", "specs": "100% Whole Wheat Flour, Zero Maida, High Dietary Fibre, No Added Preservatives", "price": max(40.0, cp), "type": "HEALTHY WHEAT ESSENTIAL", "reason": "100% Whole wheat dietary fiber staple across quick commerce."},
+                    {"name": "Modern Brown Bread Sandwich Pack (400g)", "brand": "Modern", "specs": "Enriched with Vitamin B Complex, Soft Sandwich Slice, Certified Vegetarian", "price": max(35.0, round(cp * 0.9, -1)), "type": "SANDWICH VALUE PICK", "reason": "Freshly baked soft sandwich bread at direct savings."},
+                    {"name": "English Oven Premium Multi-Grain Bread (400g)", "brand": "English Oven", "specs": "Crafted with 7 Nutrient Seeds & Grains, High Protein, Artisanal Slice", "price": max(45.0, round(cp * 1.1, -1)), "type": "ARTISANAL MULTIGRAIN", "reason": "Artisanal multi-seed multigrain loaf for morning breakfast."}
+                ])
+            elif 'jam' in rn_low:
+                return _json.dumps([
+                    {"name": "Kissan Mixed Fruit Jam (500g)", "brand": "Kissan", "specs": "100% Real Fruit Pulp, Vitamin C Enriched, Classic Breakfast Spread", "price": max(120.0, cp), "type": "REAL FRUIT BENCHMARK", "reason": "India's favorite mixed fruit spread with 100% real fruit pulp."},
+                    {"name": "Mapro Mixed Fruit Lounge Jam (500g)", "brand": "Mapro", "specs": "High Strawberry & Berry Content, Mahabaleshwar Harvest, Low Added Sugar", "price": max(135.0, round(cp * 1.05, -1)), "type": "BERRY SPECIALTY", "reason": "Authentic Mahabaleshwar real fruit chunks with rich berry taste."},
+                    {"name": "Druk Mixed Fruit Sweet Preserve (500g)", "brand": "Druk", "specs": "Himalayan Real Fruit Pulp, No Artificial Colors, Classic Recipe", "price": max(110.0, round(cp * 0.9, -1)), "type": "HIMALAYAN FRUIT VALUE", "reason": "Himalayan whole fruit preserve at direct price savings."}
+                ])
+            elif 'almond' in rn_low or 'badam' in rn_low:
+                return _json.dumps([
+                    {"name": "Happilo 100% Natural California Almonds (500g)", "brand": "Happilo", "specs": "Non-GMO, Gluten Free, Zero Trans Fat, High Protein & Vitamin E California Badam", "price": max(420.0, cp), "type": "CALIFORNIA BADAM BENCHMARK", "reason": "Crunchy whole California almonds vacuum packed for peak freshness."},
+                    {"name": "Nutraj California Premium Whole Almonds (500g)", "brand": "Nutraj", "specs": "Grade-A Whole Nuts, Zero Cholesterol, Certified Natural, Heart Healthy", "price": max(399.0, round(cp * 0.92, -1)), "type": "PREMIUM VALUE NUTS", "reason": "Grade-A hand-selected natural almonds at ₹40 direct savings."},
+                    {"name": "Tata Sampann Pure California Almonds (500g)", "brand": "Tata Sampann", "specs": "Rigorous 20+ Quality Checks, Rich in Magnesium and Dietary Fiber", "price": max(460.0, round(cp * 1.05, -1)), "type": "TATA TRUST GRADE", "reason": "Backed by Tata's rigorous 20-step quality parameters for authentic nutty crunch."}
+                ])
+            else:
+                p1 = round(cp * 0.95, -1) if cp > 40 else cp
+                p2 = round(cp * 0.85, -1) if cp > 40 else max(20.0, cp - 5.0)
+                p3 = round(cp * 1.05, -1) if cp > 40 else cp + 5.0
+                return _json.dumps([
+                    {"name": f"Farm Fresh Premium {raw_name.title()}", "brand": "Farm Fresh", "specs": f"Farm-direct sorted produce, crisp quality, local supply chain", "price": p1, "type": "FRESH FARM PRODUCE", "reason": "Fresh daily market produce direct from regional agricultural mandi."},
+                    {"name": f"Organic Certified {raw_name.title()}", "brand": "Organic Tattva", "specs": f"100% Certified Organic, Zero Synthetic Pesticides, Naturally Grown", "price": p3, "type": "ORGANIC HEALTH CHOICE", "reason": "Chemical-free organically cultivated nutrition."},
+                    {"name": f"Daily Value Wholesale {raw_name.title()}", "brand": "Local Mandi", "specs": f"Bulk daily staple packaging at wholesale neighborhood pricing", "price": p2, "type": "NEIGHBORHOOD MANDI VALUE", "reason": "Direct wholesale price savings for everyday household cooking."}
+                ])
         else:
             # UNIVERSAL DYNAMIC ARCHETYPE FOR ANY NOVEL PRODUCT ON EARTH (Live Web Discovery)
             pm = _re.search(r'Current Price:\s*₹?([\d,]+(?:\.\d+)?)', prompt)
             cp = float(pm.group(1).replace(',', '')) if pm else 2500.0
-            raw_name = p_name_match.group(1) if p_name_match else _re.sub(r'[\"\']', '', prompt)[:35]
             hits = duckduckgo_search(f"alternative to {raw_name} price India", timeout=6)
             alt_list = []
             for h in hits:
