@@ -76,12 +76,10 @@ def wait_for_db(max_retries=30, delay=1.0):
         print(f"WARNING: Waiting for PostgreSQL database container (attempt {attempt}/{max_retries})...", flush=True)
         time.sleep(delay)
 
-    # Fallback to SQLite so environment never crashes if PostgreSQL is unreachable
-    logger.warning("PostgreSQL could not be reached after retries. Initializing resilient SQLite database fallback.")
-    print("WARNING: Initializing resilient SQLite database fallback (sqlite:///shopagent.db)", flush=True)
-    engine = create_engine("sqlite:///shopagent.db", pool_pre_ping=True)
-    SessionLocal.configure(bind=engine)
-    return True
+    err_msg = f"FATAL: PostgreSQL database could not be reached after {max_retries} attempts. Candidates checked: {[re.sub(r':([^@]+)@', ':****@', c) for c in candidates]}. Verify that shopagent-db is running and healthy."
+    logger.error(err_msg)
+    print(f"ERROR: {err_msg}", flush=True)
+    raise RuntimeError(err_msg)
 
 def auto_migrate_schema(eng):
     """Safely adds missing columns and alters constraints on existing PostgreSQL tables without data loss."""

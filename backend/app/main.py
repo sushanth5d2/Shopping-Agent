@@ -3,6 +3,7 @@ from datetime import datetime,timedelta,timezone
 import uuid,hashlib,re
 from urllib.parse import urlparse
 from fastapi import FastAPI,Depends,HTTPException,Header,Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel,Field,EmailStr
 from sqlalchemy.orm import Session
@@ -32,6 +33,23 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title='ShopAgent API', version='3.0.0', lifespan=lifespan)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    from sqlalchemy.exc import OperationalError, DatabaseError
+    import logging
+    logger = logging.getLogger('uvicorn')
+    if isinstance(exc, (OperationalError, DatabaseError)):
+        logger.error(f"DATABASE SERVER CRASHED OR UNREACHABLE during {request.method} {request.url.path}: {exc}")
+        return JSONResponse(
+            status_code=503,
+            content={'detail': 'Database server connection failed or crashed. Please verify that shopagent-db is running and healthy.'}
+        )
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={'detail': exc.detail})
+    logger.error(f"Server Exception at {request.method} {request.url.path}: {exc}")
+    return JSONResponse(status_code=500, content={'detail': f"Server error: {str(exc)}"})
+
 cors_list = [x.strip() for x in settings.cors_origins.split(',') if x.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -764,7 +782,8 @@ def intent(p:Intent,u=Depends(current_user),db:Session=Depends(get_db)):
    return {'parsed': {'name': prod_name, 'target_price': obs.price, 'mode': 'BUY_NOW'}, 'items': [item_obj(db, it)]}
   except Exception as exc:
    import logging
-   logging.getLogger('uvicorn').warning(f"Intent URL analysis failed for {raw_text[:100]}: {exc}")
+   logging.getLogger('uvicorn').error(f"Intent URL analysis failed for {raw_text[:100]}: {exc}")
+   raise HTTPException(status_code=502, detail=f"Failed to process product URL: {exc}")
 
  parsed=get_ai_provider(pref=pref).parse(p.text)
  chunks=[x.strip() for x in re.split(r',|\band\b',p.text,flags=re.I) if x.strip()]
@@ -901,12 +920,17 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
    db.commit()
    return {'item_id':item.id,'product':{'id':product.id,'name':product.name,'brand':product.brand,'model':product.model,'variant':product.variant,'gtin':product.gtin},'source':{'url':p.url,'price':existing_l.price,'true_total':existing_l.price},'comparison':product_summary(db,product.id),'monitoring':p.monitor}
 
- try:
-  validate_public_url(p.url)
-  source=connector_for(p.url).observe_url(p.url)
- except Exception as exc:
-  clean_name = parse_name_from_url(p.url)
-  source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
+  try:
+   validate_public_url(p.url)
+   source=connector_for(p.url).observe_url(p.url)
+  except Exception as exc:
+   clean_name = parse_name_from_url(p.url)
+   if not clean_name or clean_name == 'Product Online':
+    raise HTTPException(status_code=502, detail=f"Failed to extract product from {p.url}: {exc}")
+   source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
+
+  if not source or not source.name or source.name == 'Product Online':
+   raise HTTPException(status_code=502, detail=f"Could not extract genuine product details from {p.url}. The retailer page may be unreachable or protected.")
 
  # Find or generate cross-store comparison listings for this genuine product
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
