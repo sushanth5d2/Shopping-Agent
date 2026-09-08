@@ -18,8 +18,9 @@ services:
         aliases:
           - db
           - shopagent-db
+          - postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U shopagent -d shopagent"]
+      test: ["CMD-SHELL", "pg_isready -U shopagent -d shopagent"]
       interval: 2s
       timeout: 3s
       retries: 20
@@ -36,7 +37,7 @@ services:
     image: shopagent-backend:latest
     container_name: shopagent-backend
     environment:
-      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent?sslmode=disable
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
       SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
       SHOPAGENT_CORS_ORIGINS: "*"
       SHOPAGENT_AI_API_BASE_URL: ${SHOPAGENT_AI_API_BASE_URL:-}
@@ -72,7 +73,7 @@ services:
     container_name: shopagent-worker
     command: ["python", "-m", "app.monitor_worker"]
     environment:
-      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent?sslmode=disable
+      SHOPAGENT_DATABASE_URL: postgresql+psycopg://shopagent:${POSTGRES_PASSWORD:-shopagent_secure_pass_2026}@db:5432/shopagent
       SHOPAGENT_JWT_SECRET: ${SHOPAGENT_JWT_SECRET:-shopagent-development-secret-key-32chars-min-len}
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
@@ -111,8 +112,6 @@ services:
 networks:
   shopagent_net:
     driver: bridge
-    driver_opts:
-      com.docker.network.driver.mtu: 1400
 
 volumes:
   shopagent_pg:

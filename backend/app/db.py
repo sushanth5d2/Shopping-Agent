@@ -1,5 +1,4 @@
-import os, time, logging, re, socket
-from urllib.parse import urlparse, urlunparse
+import os, time, logging, re
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from .config import settings
@@ -9,57 +8,37 @@ logger = logging.getLogger('uvicorn')
 class Base(DeclarativeBase):
     pass
 
-def resolve_url_to_ipv4(url: str) -> str:
-    """Resolves URL hostname to direct IPv4 to eliminate container IPv6 blackhole timeouts."""
-    if not url or url.startswith('sqlite'):
-        return url
-    try:
-        p = urlparse(url)
-        if not p.hostname or p.hostname in ('127.0.0.1', 'localhost'):
-            return url
-        addr_info = socket.getaddrinfo(p.hostname, p.port or 5432, socket.AF_INET, socket.SOCK_STREAM)
-        if addr_info:
-            ip = addr_info[0][4][0]
-            port_str = f":{p.port}" if p.port else ""
-            user_str = f"{p.username}" if p.username else ""
-            if p.password:
-                user_str += f":{p.password}"
-            if user_str:
-                user_str += "@"
-            netloc = f"{user_str}{ip}{port_str}"
-            return urlunparse((p.scheme, netloc, p.path, p.params, p.query, p.fragment))
-    except Exception:
-        pass
-    return url
-
-def make_engine(url: str, timeout: int = 5):
-    if url.startswith('sqlite'):
-        return create_engine(url, pool_pre_ping=True)
-    connect_args = {}
-    if 'postgresql' in url:
-        connect_args['connect_timeout'] = timeout
-        if 'sslmode' not in url:
-            connect_args['sslmode'] = 'disable'
-    return create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
-
 def get_candidate_urls():
     env_url = os.getenv('SHOPAGENT_DATABASE_URL') or os.getenv('DATABASE_URL')
+    urls = []
     if env_url:
         u = env_url.replace('postgresql://', 'postgresql+psycopg://', 1)
-        return [u]
-
-    if settings.database_url:
-        return [settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1)]
-
+        urls.append(u)
+    
     base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
-    return [
-        f"postgresql+psycopg://shopagent:{base_pass}@localhost:5432/shopagent?sslmode=disable",
-        f"postgresql+psycopg://shopagent:{base_pass}@127.0.0.1:5432/shopagent?sslmode=disable",
-    ]
+    hosts = ['db', 'shopagent-db', 'localhost', '127.0.0.1', 'postgres']
+    
+    # Try multiple common auth permutations for Docker and local dev
+    for host in hosts:
+        urls.append(f"postgresql+psycopg://shopagent:{base_pass}@{host}:5432/shopagent")
+        urls.append(f"postgresql+psycopg://shopagent@{host}:5432/shopagent")
+        urls.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/shopagent")
+        urls.append(f"postgresql+psycopg://postgres@{host}:5432/shopagent")
+    
+    if settings.database_url:
+        urls.append(settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1))
+    
+    seen = set()
+    deduped = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    return deduped
 
 # Initialize with the first candidate
 _initial_urls = get_candidate_urls()
-engine = make_engine(_initial_urls[0], timeout=5)
+engine = create_engine(_initial_urls[0], pool_pre_ping=True, pool_recycle=300)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_engine():
@@ -74,64 +53,35 @@ def get_db():
     finally:
         db.close()
 
-def wait_for_db(max_retries=20, delay=1.5):
-    """Waits for PostgreSQL database to be ready and connects, with fallback to SQLite."""
+def wait_for_db(max_retries=30, delay=1.0):
+    """Iterates through candidate hosts and credentials until PostgreSQL is connected."""
     global engine, SessionLocal
-    raw_candidates = get_candidate_urls()
-    target_url = raw_candidates[0]
-
-    if target_url.startswith('sqlite'):
-        engine = create_engine(target_url, pool_pre_ping=True)
-        SessionLocal.configure(bind=engine)
-        return True
-
-    # Pre-resolve to direct IPv4 address to bypass Docker DNS/IPv6 connection timeouts
-    candidates = []
-    ipv4_u = resolve_url_to_ipv4(target_url)
-    if ipv4_u and ipv4_u != target_url and ipv4_u not in candidates:
-        candidates.append(ipv4_u)
-    if target_url not in candidates:
-        candidates.append(target_url)
-
-    # If host is db or shopagent-db, add alias alternative
-    if '@db:' in target_url:
-        alt = target_url.replace('@db:', '@shopagent-db:')
-        if alt not in candidates:
-            candidates.append(alt)
-    elif '@shopagent-db:' in target_url:
-        alt = target_url.replace('@shopagent-db:', '@db:')
-        if alt not in candidates:
-            candidates.append(alt)
-
-    masked_target = re.sub(r':([^@]+)@', ':****@', target_url)
+    candidates = get_candidate_urls()
+    
     for attempt in range(1, max_retries + 1):
         for url in candidates:
-            conn_masked = re.sub(r':([^@]+)@', ':****@', url)
             try:
-                test_engine = make_engine(url, timeout=5)
+                test_engine = create_engine(url, pool_pre_ping=True, pool_recycle=300)
                 with test_engine.connect() as conn:
                     engine = test_engine
                     SessionLocal.configure(bind=engine)
-                    logger.info(f"Connected to PostgreSQL database: {conn_masked}")
-                    print(f"INFO: Connected to PostgreSQL database: {conn_masked}", flush=True)
+                    masked = re.sub(r':([^@]+)@', ':****@', url)
+                    logger.info(f"Connected to PostgreSQL database: {masked}")
+                    print(f"INFO: Connected to PostgreSQL database: {masked}", flush=True)
                     return True
-            except Exception as exc:
-                if attempt == 1 or attempt % 5 == 0:
-                    print(f"DEBUG: Connect attempt to {conn_masked} failed: {type(exc).__name__} - {exc}", flush=True)
+            except Exception:
+                pass
+        
+        logger.warning(f"Waiting for PostgreSQL database container (attempt {attempt}/{max_retries})...")
+        print(f"WARNING: Waiting for PostgreSQL database container (attempt {attempt}/{max_retries})...", flush=True)
+        time.sleep(delay)
 
-        if attempt < max_retries:
-            if attempt == 1 or attempt % 5 == 0:
-                logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
-                print(f"INFO: Waiting for database container to be ready (attempt {attempt}/{max_retries})...", flush=True)
-            time.sleep(delay)
-
-    # Graceful fallback to SQLite so backend NEVER fails to start
+    # Fallback to SQLite so environment never crashes if PostgreSQL is unreachable
     logger.warning("PostgreSQL could not be reached after retries. Initializing resilient SQLite database fallback.")
     print("WARNING: Initializing resilient SQLite database fallback (sqlite:///shopagent.db)", flush=True)
     engine = create_engine("sqlite:///shopagent.db", pool_pre_ping=True)
     SessionLocal.configure(bind=engine)
     return True
-
 
 def auto_migrate_schema(eng):
     """Safely adds missing columns and alters constraints on existing PostgreSQL tables without data loss."""
@@ -189,12 +139,6 @@ def auto_migrate_schema(eng):
         );"""
     ]
     with eng.connect() as conn:
-        try:
-            conn.execute(text("SET lock_timeout = '2s';"))
-            conn.execute(text("SET statement_timeout = '5s';"))
-            conn.commit()
-        except Exception:
-            pass
         for stmt in migrations:
             try:
                 conn.execute(text(stmt))
