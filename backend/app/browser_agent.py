@@ -162,21 +162,37 @@ class BrowserAgent:
 
             # Extract Price
             price_val = 0.0
-            price_el = (
-                soup.select_one('.a-price-whole') or
-                soup.select_one('.a-price .a-offscreen') or
-                soup.select_one('#priceblock_ourprice') or
-                soup.select_one('#priceblock_dealprice') or
-                soup.select_one('div.Nx9bqj') or
-                soup.select_one('div._30jeq3')
-            )
-            if price_el:
-                raw_p = price_el.get_text(strip=True)
-                raw_clean = re.sub(r'[^0-9.]', '', raw_p.replace(',', ''))
-                try:
-                    price_val = float(raw_clean)
-                except Exception:
-                    pass
+            price_selectors = [
+                '#corePrice_desktop .apexPriceToPay .a-offscreen',
+                '#corePriceDisplay_desktop_feature_div .a-price-whole',
+                '#corePrice_desktop .a-price-whole',
+                '.priceToPay span.a-price-whole',
+                '.priceToPay .a-price-whole',
+                '.priceToPay .a-offscreen',
+                '.apex-core-price-identifier',
+                '#priceblock_ourprice',
+                '#priceblock_dealprice',
+                'div.Nx9bqj',
+                'div._30jeq3',
+                '.a-price-whole',
+                '.a-price .a-offscreen',
+                'span.price',
+                '[data-price]'
+            ]
+            for sel in price_selectors:
+                for el in soup.select(sel):
+                    raw_p = el.get('data-price') or el.get_text(strip=True)
+                    if raw_p and re.search(r'\d', raw_p):
+                        raw_clean = re.sub(r'[^0-9.]', '', raw_p.replace(',', ''))
+                        try:
+                            pv = float(raw_clean)
+                            if pv > 0:
+                                price_val = pv
+                                break
+                        except Exception:
+                            pass
+                if price_val > 0:
+                    break
 
             if price_val <= 0:
                 price_match = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)', soup.get_text()[:15000])

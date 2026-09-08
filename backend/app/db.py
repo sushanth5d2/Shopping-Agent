@@ -115,6 +115,8 @@ def auto_migrate_schema(eng):
         "ALTER TABLE products ALTER COLUMN variant TYPE VARCHAR(255);",
         "ALTER TABLE products ALTER COLUMN category TYPE VARCHAR(255);",
         "ALTER TABLE products ALTER COLUMN specs TYPE TEXT;",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS reviews_json TEXT DEFAULT '';",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS bank_offers_json TEXT DEFAULT '';",
         "ALTER TABLE shopping_items ALTER COLUMN name TYPE TEXT;",
         "ALTER TABLE orders ALTER COLUMN product_name TYPE TEXT;",
         "ALTER TABLE store_listings ALTER COLUMN url TYPE TEXT;",
@@ -153,6 +155,8 @@ def cleanup_corrupted_data(eng):
         return
     from sqlalchemy import text
     cleanup_stmts = [
+        "DELETE FROM price_snapshots WHERE price = 42600.0;",
+        "DELETE FROM store_listings WHERE price = 42600.0;",
         "DELETE FROM shopping_items WHERE name LIKE '%患者向医薬品ガイド%' OR name = 'Product Online';",
         "DELETE FROM products WHERE name LIKE '%患者向医薬品ガイド%' OR name = 'Product Online';",
         "DELETE FROM stores WHERE name LIKE '%医薬品医療機器総合機構%' OR name LIKE '%患者向医薬品ガイド%';",

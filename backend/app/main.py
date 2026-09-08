@@ -521,6 +521,10 @@ def add_item(p:ItemIn,u=Depends(current_user),db:Session=Depends(get_db)):
    item_price = obs.price if obs.price > 0 else (p.target_price or p.max_price)
 
    matched_prod = find_or_create_product_for_name(db, item_display_name, item_price, pincode=pincode)
+   if getattr(obs, 'real_reviews', None) and obs.real_reviews:
+    matched_prod.reviews_json = json.dumps(obs.real_reviews)
+   if getattr(obs, 'card_offers', None) and obs.card_offers:
+    matched_prod.bank_offers_json = json.dumps(obs.card_offers)
 
    # Ensure the specific store listing for this URL exists
    host = (urlparse(raw_name).hostname or '').lower().replace('www.', '')
@@ -900,6 +904,10 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
  pincode = getattr(pref, 'delivery_pincode', '') if pref else ''
  product = find_or_create_product_for_name(db, source.name, source.price, pincode=pincode)
+ if getattr(source, 'real_reviews', None) and source.real_reviews:
+  product.reviews_json = json.dumps(source.real_reviews)
+ if getattr(source, 'card_offers', None) and source.card_offers:
+  product.bank_offers_json = json.dumps(source.card_offers)
  
  # Ensure the observed URL store listing exists
  host=(urlparse(p.url).hostname or '').lower()
@@ -1029,7 +1037,7 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  why_not=generate_why_not_buy(current_price,hist,p.__dict__,pref=pref)
  ownership=calculate_ownership_cost(current_price,cat,product_name=p.name,pref=pref)
  compat=check_compatibility(p.name,p.specs or f"Category: {cat}",pref=pref)
- reviews=get_review_intelligence(p.name, cat, pref=pref)
+ reviews=get_review_intelligence(p.name, cat, pref=pref, saved_reviews=getattr(p, 'reviews_json', ''))
  deal_truth=analyze_deal_truth(best.get('price',current_price),current_price,hist)
  # Derive seller trust from real listing data
  best_listing = db.query(StoreListing).filter_by(product_id=product_id).order_by(StoreListing.price.asc()).first()

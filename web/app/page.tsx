@@ -173,7 +173,12 @@ export default function App() {
   const [orders, setOrders] = useState<any[]>([]);
   const [activity, setActivity] = useState<any[]>([]);
   const [input, setInput] = useState('');
-  const [productUrl, setProductUrlState] = useState('');
+  const [productUrl, setProductUrlState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('sa_extracting_url') || localStorage.getItem('sa_product_url') || '';
+    }
+    return '';
+  });
   const setProductUrl = (val: string) => {
     setProductUrlState(val);
     if (typeof window !== 'undefined') {
@@ -183,7 +188,12 @@ export default function App() {
       } catch {}
     }
   };
-  const [urlBusy, setUrlBusy] = useState(false);
+  const [urlBusy, setUrlBusy] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return Boolean(localStorage.getItem('sa_extracting_url'));
+    }
+    return false;
+  });
   const [compare, setCompareState] = useState<any>(null);
   const setCompare = (newCompare: any) => {
     setCompareState(newCompare);
@@ -300,6 +310,8 @@ export default function App() {
           // If an extraction was in-flight when the page refreshed, resume it seamlessly
           const inFlightUrl = localStorage.getItem('sa_extracting_url');
           if (inFlightUrl) {
+            setProductUrlState(inFlightUrl);
+            setUrlBusy(true);
             analyzeUrl(false, inFlightUrl);
           }
         } catch {
@@ -1168,11 +1180,11 @@ function PriceHistoryChart({ tracker, currentPrice }: { tracker: any; currentPri
     <div className="panel" style={{ borderColor: '#3b82f6', overflow: 'hidden' }}>
       <div className="panel-head">
         <div>
-          <span className="eyebrow" style={{ color: '#60a5fa' }}>90-DAY PRICE HISTORY &amp; BENCHMARKS</span>
+          <span className="eyebrow" style={{ color: '#60a5fa' }}>{tracker?.source === 'market_history' ? '90-DAY PRICE HISTORY & BENCHMARKS' : 'PRICE HISTORY & SNAPSHOT TRACKER'}</span>
           <h3>Price History &amp; Trend Graph</h3>
         </div>
         <span className="status blue" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Activity size={13} /> 90 Days Tracked
+          <Activity size={13} /> {tracker?.source === 'market_history' ? '90-Day Market Benchmarks' : `${tracker?.days_tracked || 1} Day${(tracker?.days_tracked || 1) > 1 ? 's' : ''} Tracked`}
         </span>
       </div>
 
@@ -1183,7 +1195,7 @@ function PriceHistoryChart({ tracker, currentPrice }: { tracker: any; currentPri
           <strong style={{ color: '#34d399' }}>₹{Number(low).toLocaleString()}</strong>
         </div>
         <div className="price-stat-pill" style={{ borderLeft: '4px solid #3b82f6' }}>
-          <span>90-Day Fair Average</span>
+          <span>{tracker?.source === 'market_history' ? '90-Day Fair Average' : 'Historical Fair Average'}</span>
           <strong style={{ color: '#60a5fa' }}>₹{Number(avg).toLocaleString()}</strong>
         </div>
         <div className="price-stat-pill" style={{ borderLeft: '4px solid #f43f5e' }}>
@@ -1191,7 +1203,7 @@ function PriceHistoryChart({ tracker, currentPrice }: { tracker: any; currentPri
           <strong style={{ color: '#fb7185' }}>₹{Number(high).toLocaleString()}</strong>
         </div>
         <div className="price-stat-pill" style={{ borderLeft: `4px solid ${diffVsAvg <= 0 ? '#10b981' : '#f59e0b'}` }}>
-          <span>Live vs 90-Day Avg</span>
+          <span>{tracker?.source === 'market_history' ? 'Live vs 90-Day Avg' : 'Live vs Average'}</span>
           <strong style={{ color: diffVsAvg <= 0 ? '#34d399' : '#fbbf24' }}>
             {diffVsAvg <= 0 ? `-₹${Math.abs(diffVsAvg).toLocaleString()} (${Math.abs(diffPct)}% below)` : `+₹${diffVsAvg.toLocaleString()} (${diffPct}% above)`}
           </strong>
@@ -1208,17 +1220,27 @@ function PriceHistoryChart({ tracker, currentPrice }: { tracker: any; currentPri
             </linearGradient>
           </defs>
 
-          {/* Reference Line: Highest */}
-          <line x1={padLeft} y1={yHigh} x2={svgWidth - padRight} y2={yHigh} stroke="#f43f5e" strokeDasharray="4 4" strokeOpacity="0.5" strokeWidth="1" />
-          <text x={padLeft + 6} y={yHigh - 6} fill="#fb7185" fontSize="10" fontWeight="600">PEAK ₹{Number(high).toLocaleString()}</text>
+          {/* Reference Lines with Overlap Prevention */}
+          {Math.abs(high - low) < 1 ? (
+            <>
+              <line x1={padLeft} y1={yLow} x2={svgWidth - padRight} y2={yLow} stroke="#3b82f6" strokeDasharray="4 4" strokeOpacity="0.6" strokeWidth="1.2" />
+              <text x={padLeft + 6} y={Math.max(16, yLow - 8)} fill="#60a5fa" fontSize="10" fontWeight="700">VERIFIED BASELINE ₹{Number(low).toLocaleString()}</text>
+            </>
+          ) : (
+            <>
+              {/* Reference Line: Highest */}
+              <line x1={padLeft} y1={yHigh} x2={svgWidth - padRight} y2={yHigh} stroke="#f43f5e" strokeDasharray="4 4" strokeOpacity="0.5" strokeWidth="1" />
+              <text x={padLeft + 6} y={Math.max(14, yHigh - 6)} fill="#fb7185" fontSize="10" fontWeight="600">PEAK ₹{Number(high).toLocaleString()}</text>
 
-          {/* Reference Line: Average */}
-          <line x1={padLeft} y1={yAvg} x2={svgWidth - padRight} y2={yAvg} stroke="#3b82f6" strokeDasharray="4 4" strokeOpacity="0.5" strokeWidth="1" />
-          <text x={padLeft + 6} y={yAvg - 6} fill="#60a5fa" fontSize="10" fontWeight="600">90-DAY AVG ₹{Number(avg).toLocaleString()}</text>
+              {/* Reference Line: Average */}
+              <line x1={padLeft} y1={yAvg} x2={svgWidth - padRight} y2={yAvg} stroke="#3b82f6" strokeDasharray="4 4" strokeOpacity="0.5" strokeWidth="1" />
+              <text x={padLeft + 6} y={yAvg - 6} fill="#60a5fa" fontSize="10" fontWeight="600">{tracker?.source === 'market_history' ? '90-DAY AVG' : 'AVG'} ₹{Number(avg).toLocaleString()}</text>
 
-          {/* Reference Line: Lowest */}
-          <line x1={padLeft} y1={yLow} x2={svgWidth - padRight} y2={yLow} stroke="#10b981" strokeDasharray="4 4" strokeOpacity="0.6" strokeWidth="1.2" />
-          <text x={padLeft + 6} y={yLow - 6} fill="#34d399" fontSize="10" fontWeight="700">LOW ₹{Number(low).toLocaleString()}</text>
+              {/* Reference Line: Lowest */}
+              <line x1={padLeft} y1={yLow} x2={svgWidth - padRight} y2={yLow} stroke="#10b981" strokeDasharray="4 4" strokeOpacity="0.6" strokeWidth="1.2" />
+              <text x={padLeft + 6} y={Math.min(svgHeight - 20, yLow + 14)} fill="#34d399" fontSize="10" fontWeight="700">LOW ₹{Number(low).toLocaleString()}</text>
+            </>
+          )}
 
           {/* Area Fill */}
           <path d={areaD} fill="url(#priceGradient)" />
