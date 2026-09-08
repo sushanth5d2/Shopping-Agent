@@ -92,10 +92,11 @@ services:
     container_name: shopagent-web
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
-      BACKEND_INTERNAL_URL: http://127.0.0.1:8000
+      BACKEND_INTERNAL_URL: http://host.docker.internal:8000
     ports:
       - "${SHOPAGENT_WEB_PORT:-3000}:3000"
-    network_mode: "host"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_started
