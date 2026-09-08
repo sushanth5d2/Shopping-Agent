@@ -4499,39 +4499,63 @@ def basket(items, mode='CHEAPEST'):
 
     single_store_comparisons.sort(key=lambda x: x['final_payable'])
 
-    # 3. Evaluate multi-item combinations with checkout cost
+    is_mostly_grocery = sum(1 for it in items if classify_product_category(it.get('name', '')) in ('GROCERY', 'Groceries & Essentials') or detect_product_domain(it.get('name', '')) == 'GROCERY' or 'GROCER' in (it.get('category') or '').upper()) >= max(1, len(items) * 0.4)
+
+    # If single store fulfills all items and it's mostly grocery or FEWEST_STORES, immediately return the best single store (0ms latency, zero explosion)
+    if single_store_comparisons and (is_mostly_grocery or mode == 'FEWEST_STORES'):
+        best_single = single_store_comparisons[0]
+        winning_stores = {best_single['store']: best_single['final_payable']}
+        winning_details = {best_single['store']: best_single}
+        winning_items_by_store = {best_single['store']: [it.get('item_id') for it in items]}
+        final_total = best_single['final_payable']
+        individual_sum = sum(min(x['total'] for x in i['listings']) for i in items if i.get('listings'))
+        savings = round(max(0, individual_sum - final_total), 2) if final_total <= individual_sum else 0.0
+        return {
+            'total': final_total,
+            'stores': winning_stores,
+            'checkout_breakdown': winning_details,
+            'single_store_comparisons': single_store_comparisons,
+            'individual_cheapest': round(individual_sum, 2),
+            'savings': savings,
+            'strategy': mode,
+            'store_items': winning_items_by_store
+        }
+
+    # 3. Evaluate multi-item combinations with checkout cost (pruned to top 2 listings per item to prevent Cartesian explosion)
     best = None
-    qc_stores = {'blinkit', 'zepto', 'bigbasket', 'swiggy instamart', 'flipkart minutes', 'amazon fresh'}
-    for combo in product(*[x['listings'] for x in items]):
-        stores = {}
-        items_by_store = {}
-        for idx, x in enumerate(combo):
-            sname = x['store']
-            stores[sname] = stores.get(sname, 0) + x['total']
-            items_by_store.setdefault(sname, []).append(items[idx].get('item_id'))
+    pruned_listings = []
+    for it in items[:8]:
+        s_list = sorted(it.get('listings', []), key=lambda x: x['total'])[:2]
+        if s_list:
+            pruned_listings.append(s_list)
 
-        total_payable = 0.0
-        store_details = {}
-        for sname, ssub in stores.items():
-            sc = calculate_store_checkout(sname, ssub)
-            store_details[sname] = sc
-            total_payable += sc['final_payable']
-        total_payable = round(total_payable, 2)
+    if pruned_listings:
+        for combo in product(*pruned_listings):
+            stores = {}
+            items_by_store = {}
+            for idx, x in enumerate(combo):
+                sname = x['store']
+                stores[sname] = stores.get(sname, 0) + x['total']
+                items_by_store.setdefault(sname, []).append(items[idx].get('item_id'))
 
-        # Penalize splitting quick-commerce groceries across multiple stores
-        # (each extra store adds delivery friction, rider dispatch, and platform fees)
-        active_qc = sum(1 for s in stores if any(q in s.lower() for q in ['blinkit', 'zepto', 'bigbasket', 'instamart', 'minutes', 'fresh']))
-        qc_penalty = (active_qc - 1) * 50.0 if active_qc > 1 else 0.0
-        eval_payable = total_payable + qc_penalty
+            total_payable = 0.0
+            store_details = {}
+            for sname, ssub in stores.items():
+                sc = calculate_store_checkout(sname, ssub)
+                store_details[sname] = sc
+                total_payable += sc['final_payable']
+            total_payable = round(total_payable, 2)
 
-        score = (eval_payable, len(stores)) if mode != 'FEWEST_STORES' else (len(stores), eval_payable)
-        if best is None or score < best[0]:
-            best = (score, stores, store_details, total_payable, items_by_store)
+            active_qc = sum(1 for s in stores if any(q in s.lower() for q in ['blinkit', 'zepto', 'bigbasket', 'instamart', 'minutes', 'fresh']))
+            qc_penalty = (active_qc - 1) * 50.0 if active_qc > 1 else 0.0
+            eval_payable = total_payable + qc_penalty
+
+            score = (eval_payable, len(stores)) if mode != 'FEWEST_STORES' else (len(stores), eval_payable)
+            if best is None or score < best[0]:
+                best = (score, stores, store_details, total_payable, items_by_store)
 
     # 4. Check if a single store beats or matches the combo
-    # For grocery items, strictly enforce single-store basket fulfillment to eliminate duplicate delivery charges
-    is_mostly_grocery = sum(1 for it in items if classify_product_category(it.get('name', '')) == 'GROCERY' or detect_product_domain(it.get('name', '')) == 'GROCERY') >= len(items) * 0.5
-    if single_store_comparisons and (is_mostly_grocery or mode == 'FEWEST_STORES' or (best and single_store_comparisons[0]['final_payable'] <= best[3] * 1.08)):
+    if single_store_comparisons and (is_mostly_grocery or mode == 'FEWEST_STORES' or (best and single_store_comparisons[0]['final_payable'] <= best[3] * 1.15)):
         best_single = single_store_comparisons[0]
         winning_stores = {best_single['store']: best_single['final_payable']}
         winning_details = {best_single['store']: best_single}

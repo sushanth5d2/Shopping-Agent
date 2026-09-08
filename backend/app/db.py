@@ -27,7 +27,8 @@ def get_candidate_urls():
             urls.append(u)
     
     base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
-    hosts = ['db', 'shopagent-db', 'localhost', '127.0.0.1', 'postgres']
+    is_docker = os.path.exists('/.dockerenv') or os.getenv('IS_DOCKER') == 'true'
+    hosts = ['db', 'shopagent-db', 'postgres', 'localhost', '127.0.0.1'] if is_docker else ['127.0.0.1', 'localhost']
     
     # Try reachable hosts first
     for host in hosts:

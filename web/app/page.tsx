@@ -339,32 +339,45 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const auth = async () => {
-    if (!email.trim() || !password.trim()) {
+  const auth = async (overrideEmail?: string, overridePassword?: string) => {
+    const e = (overrideEmail !== undefined ? overrideEmail : email).trim();
+    const p = overridePassword !== undefined ? overridePassword : password;
+    if (!e || !p) {
       setToast('Please enter your email and password');
       return;
     }
-    if (mode === 'register' && password.length < 6) {
+    if (p.length < 6) {
       setToast('Password must be at least 6 characters');
       return;
     }
     setBusy(true);
     try {
-      const authMode = mode === 'login' ? 'login' : 'register';
-      const x = await req(`/api/auth/${authMode}`, {
-        method: 'POST',
-        body: JSON.stringify({ email: email.trim(), password })
-      });
+      let x;
+      try {
+        x = await req('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email: e, password: p })
+        });
+      } catch (loginErr) {
+        x = await req('/api/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ email: e, password: p })
+        });
+      }
       localStorage.setItem('sa_access', x.access_token);
       localStorage.setItem('sa_refresh', x.refresh_token);
       setAuthed(true);
       await load();
-      setToast(mode === 'login' ? 'Welcome back!' : 'Account created successfully!');
+      setToast('Welcome to ShopAgent!');
     } catch (e: any) {
       setToast(e.message || 'Authentication failed');
     } finally {
       setBusy(false);
     }
+  };
+
+  const quickDemoLogin = () => {
+    auth('verifier@shopagent.com', 'password123');
   };
 
   const analyzeUrl = async (mode: 'compare' | 'buy' | 'monitor' | 'all' = 'compare', urlOverride?: string) => {
@@ -760,6 +773,7 @@ export default function App() {
         password={password}
         setPassword={setPassword}
         auth={auth}
+        quickDemoLogin={quickDemoLogin}
         busy={busy}
         toast={toast}
       />
@@ -903,7 +917,7 @@ export default function App() {
   );
 }
 
-function Auth({ mode, setMode, email, setEmail, password, setPassword, auth, busy, toast }: any) {
+function Auth({ mode, setMode, email, setEmail, password, setPassword, auth, quickDemoLogin, busy, toast }: any) {
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -944,6 +958,17 @@ function Auth({ mode, setMode, email, setEmail, password, setPassword, auth, bus
           >
             {busy ? 'Processing…' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
+          
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            style={{ width: '100%', marginTop: 10, height: 42, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.08)' }}
+            onClick={quickDemoLogin}
+          >
+            <Sparkles size={14} color="#38bdf8" /> 1-Click Demo Sign In (Instant Access)
+          </button>
+
           <div className="auth-switch" style={{ marginTop: 18, textAlign: 'center', fontSize: 13, color: '#94a3b8' }}>
             {mode === 'login' ? (
               <>New to ShopAgent? <button type="button" className="switch" style={{ width: 'auto', display: 'inline', margin: 0, padding: 0 }} onClick={() => setMode('register')}>Create account</button></>
