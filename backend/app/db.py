@@ -148,13 +148,17 @@ def auto_migrate_schema(eng):
                     pass
 
 def cleanup_corrupted_data(eng):
-    """Purges any corrupted or bot-blocked fallback items from previous runs."""
+    """Purges any corrupted, dummy seed data, or bot-blocked fallback items from previous runs."""
+    if eng.dialect.name != 'postgresql':
+        return
     from sqlalchemy import text
     cleanup_stmts = [
         "DELETE FROM shopping_items WHERE name LIKE '%患者向医薬品ガイド%' OR name = 'Product Online';",
         "DELETE FROM products WHERE name LIKE '%患者向医薬品ガイド%' OR name = 'Product Online';",
         "DELETE FROM stores WHERE name LIKE '%医薬品医療機器総合機構%' OR name LIKE '%患者向医薬品ガイド%';",
+        "DELETE FROM products WHERE name LIKE 'Sony WH-1000XM6%' OR name LIKE 'Apple iPhone 16 Pro%' OR name LIKE 'Apple MacBook Pro 14%' OR name LIKE 'Nike Air Zoom Pegasus%' OR name LIKE 'Samsung 55-inch Crystal%';",
         "DELETE FROM store_listings WHERE product_id NOT IN (SELECT id FROM products);",
+        "DELETE FROM price_snapshots WHERE listing_id NOT IN (SELECT id FROM store_listings);",
         "DELETE FROM monitoring_tasks WHERE item_id NOT IN (SELECT id FROM shopping_items);",
     ]
     with eng.connect() as conn:

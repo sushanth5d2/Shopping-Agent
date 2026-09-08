@@ -20,16 +20,8 @@ from .seed import seed_data, seed_user_defaults
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .db import init_db, SessionLocal
-    from .seed import seed_data
-    from .models import Product
-    if init_db():
-        db = SessionLocal()
-        try:
-            if db.query(Product).count() == 0:
-                seed_data(db)
-        finally:
-            db.close()
+    from .db import init_db
+    init_db()
     yield
 
 app = FastAPI(title='ShopAgent API', version='3.0.0', lifespan=lifespan)
@@ -212,7 +204,7 @@ def product_summary(db, pid, include_details: bool = True):
    continue
   seen_stores.add(s_canon)
   seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
-  l_coupons = get_verified_store_coupons(s_canon, l.price, p.name)
+  l_coupons = get_verified_store_coupons(s_canon, l.price, p.name, live_coupon=l.coupon)
   out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price,p.name),'coupons':l_coupons})
  if not out:raise HTTPException(404,'No live listings available for this product')
  best_item = min(out,key=lambda x:x['true_total'])
@@ -1055,9 +1047,7 @@ def decision_lab(product_id:int,u=Depends(current_user),db:Session=Depends(get_d
  hist=[s.total for l in db.query(StoreListing).filter_by(product_id=product_id).all() for s in db.query(PriceSnapshot).filter_by(listing_id=l.id).all()]
  current_price=best['true_total']
  cat = c.get('category') or (classify_product_category(p.name) if (not p.category or p.category in ('ELECTRONICS', 'General')) else p.category)
- tracker = generate_historical_price_tracker(current_price, cat, p.name)
- if len(hist) < 3:
-     hist = tracker['prices']
+ tracker = generate_historical_price_tracker(current_price, cat, p.name, snapshots=hist)
  dec=decision(current_price,None,hist,category=cat,product_name=p.name)
  score=calculate_shopagent_score(p.__dict__,best,hist)
  regret=calculate_regret_shield(current_price,hist,best.get('seller_rating',4.0))
