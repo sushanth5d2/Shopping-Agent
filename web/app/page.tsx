@@ -630,6 +630,20 @@ export default function App() {
     }
   };
 
+  const handleCheckoutStore = (storeName: string) => {
+    const storeItemIds = basketData?.store_items?.[storeName] || [];
+    let matched = todo.find((it: any) => storeItemIds.includes(it.id));
+    if (!matched) {
+      matched = todo.find((it: any) => {
+        const itemStore = (it.decision?.best_store || it.best_store || '').toLowerCase();
+        return itemStore.includes(storeName.toLowerCase());
+      }) || todo[0];
+    }
+    if (matched) {
+      buy(matched.id);
+    }
+  };
+
   const startMonitor = async (id: number) => {
     try {
       await req(`/api/items/${id}/monitor`, { method: 'POST' });
@@ -815,6 +829,9 @@ export default function App() {
               onSaveForLater={saveForLater}
               onMoveToCart={moveToCart}
               onVote={voteItem}
+              basketData={basketData}
+              onCheckoutStore={handleCheckoutStore}
+              setTab={setTab}
             />
           )}
           {tab === 'Decision Lab' && (
@@ -846,6 +863,7 @@ export default function App() {
               todo={todo}
               savedForLater={savedForLater}
               buyItem={buy}
+              onCheckoutStore={handleCheckoutStore}
               onSaveForLater={saveForLater}
               onMoveToCart={moveToCart}
               onDeleteItem={deleteItem}
@@ -857,7 +875,7 @@ export default function App() {
           {tab === 'Orders' && <Orders orders={orders} onViewReceipt={viewOrderReceipt} />}
           {tab === 'Savings' && <Savings data={data} orders={orders} />}
           {tab === 'Agent Activity' && <ActivityPage rows={activity} />}
-          {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} onSwap={swapItem} onRefresh={() => compare?.product_id && compareItem({ product_id: compare.product_id } as any)} refreshing={busy} />}
+          {tab === 'Compare' && <Compare data={compare} back={() => setTab('To-Buy')} openDecisionLab={openDecisionLab} onSwap={swapItem} onRefresh={() => compare?.product_id && compareItem({ product_id: compare.product_id } as any)} refreshing={busy} basketData={basketData} todo={todo} onCheckoutStore={handleCheckoutStore} setTab={setTab} buy={buy} />}
           {tab === 'Settings' && <SettingsPage dark={dark} setDark={setDark} aiStatus={aiStatus} preferences={preferences} savePreferences={savePreferences} busy={busy} signout={signout} />}
         </div>
       </main>
@@ -1011,7 +1029,7 @@ function Home({ input, setInput, run, busy, stats, todo, activity, compareItem, 
   );
 }
 
-function TodoPage({ items, todo, completed, savedForLater = [], compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus, onSaveForLater, onMoveToCart, onVote }: any) {
+function TodoPage({ items, todo, completed, savedForLater = [], compareItem, openDecisionLab, buy, startMonitor, onAddItem, onDeleteItem, onToggleStatus, onSaveForLater, onMoveToCart, onVote, basketData, onCheckoutStore, setTab }: any) {
   const [filter, setFilter] = useState<'ALL' | 'BUY_NOW' | 'MONITOR' | 'BUY_LATER' | 'COMPLETED'>('ALL');
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
@@ -1049,6 +1067,8 @@ function TodoPage({ items, todo, completed, savedForLater = [], compareItem, ope
     setGiftMessage('');
     setShowGiftOptions(false);
   };
+
+  const bestBasket = basketData?.single_store_comparisons?.[0];
 
   return (
     <div className="stack">
@@ -1095,6 +1115,114 @@ function TodoPage({ items, todo, completed, savedForLater = [], compareItem, ope
           </div>
         )}
       </form>
+
+      {/* Combined Grocery Basket Optimization Banner */}
+      {basketData?.single_store_comparisons && basketData.single_store_comparisons.length > 1 && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.95))',
+          border: '1px solid rgba(16, 185, 129, 0.35)',
+          borderRadius: 12,
+          padding: '16px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.25)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ background: 'rgba(16, 185, 129, 0.2)', padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.4)' }}>
+                <Sparkles size={18} color="#10b981" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <b style={{ fontSize: 15, color: '#f8fafc', letterSpacing: '0.02em' }}>
+                    ALL-IN-ONE GROCERY BASKET OPTIMIZER
+                  </b>
+                  <span style={{ fontSize: 10, background: '#059669', color: '#fff', borderRadius: 4, padding: '2px 6px', fontWeight: 800 }}>
+                    0 ITEM SPLITTING
+                  </span>
+                </div>
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                  All {activeItems.length} items bundled into one single cart to eliminate multiple delivery fees (saving ₹150+)
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {setTab && (
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => setTab('Master Cart')}
+                >
+                  View Details in Master Cart ↗
+                </button>
+              )}
+              {bestBasket && (
+                <button
+                  type="button"
+                  className="primary"
+                  style={{ fontSize: 12, padding: '6px 14px', background: '#059669', borderColor: '#047857', display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => onCheckoutStore ? onCheckoutStore(bestBasket.store) : (activeItems[0] && buy(activeItems[0].id))}
+                >
+                  <ShoppingCart size={14} />
+                  <span>Buy All on {bestBasket.store} (₹{Number(bestBasket.final_payable).toLocaleString()}) ↗</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 6 Quick-Commerce Store Comparison Bar */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            gap: 8,
+            marginTop: 4
+          }}>
+            {basketData.single_store_comparisons.map((sc: any, sIdx: number) => {
+              const isBest = sIdx === 0;
+              return (
+                <div
+                  key={sc.store}
+                  onClick={() => onCheckoutStore && onCheckoutStore(sc.store)}
+                  style={{
+                    background: isBest ? 'rgba(16, 185, 129, 0.15)' : 'rgba(30, 41, 59, 0.6)',
+                    border: isBest ? '1px solid #10b981' : '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: 8,
+                    padding: '8px 10px',
+                    cursor: 'pointer',
+                    transition: 'transform 0.15s ease, border-color 0.15s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 4
+                  }}
+                  title={`Click to checkout entire basket on ${sc.store}`}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: isBest ? '#34d399' : '#e2e8f0' }}>{sc.store}</span>
+                    {isBest && (
+                      <span style={{ fontSize: 9, background: '#10b981', color: '#000', borderRadius: 3, padding: '1px 4px', fontWeight: 800 }}>
+                        BEST
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <b style={{ fontSize: 14, color: isBest ? '#34d399' : '#fff' }}>₹{Number(sc.final_payable).toLocaleString()}</b>
+                    <span style={{ fontSize: 10, color: sc.delivery_fee === 0 ? '#34d399' : '#94a3b8' }}>
+                      {sc.delivery_fee === 0 ? 'Free Del' : `+₹${sc.delivery_fee}`}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#64748b', textAlign: 'right' }}>
+                    Tap to order ↗
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="panel">
         <div className="filterbar">
@@ -2025,12 +2153,16 @@ function DecisionLabPage({ items, selectedPid, data, onSelectProduct, onSwap, on
   );
 }
 
-function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [], buyItem, onSaveForLater, onMoveToCart, onDeleteItem }: any) {
+function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [], buyItem, onCheckoutStore, onSaveForLater, onMoveToCart, onDeleteItem }: any) {
   const stores = data?.stores || {};
   const total = Number(data?.total || 0);
   const savings = Number(data?.savings || 0);
 
   const handleCheckoutStore = (storeName: string) => {
+    if (onCheckoutStore) {
+      onCheckoutStore(storeName);
+      return;
+    }
     const storeItemIds = data?.store_items?.[storeName] || [];
     let matched = todo.find((it: any) => storeItemIds.includes(it.id));
     if (!matched) {
@@ -2736,7 +2868,7 @@ function ActivityPage({ rows }: any) {
   );
 }
 
-function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing }: any) {
+function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing, basketData, todo, onCheckoutStore, setTab, buy }: any) {
   const [copiedCoupon, setCopiedCoupon] = useState<string | null>(null);
   const tradeoffs = data?.tradeoffs || {};
   const coupons = data?.coupons || [];
@@ -2889,6 +3021,100 @@ function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing }:
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* All-In-One Grocery Basket Comparison Matrix */}
+          {basketData?.single_store_comparisons && basketData.single_store_comparisons.length > 1 && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(15, 23, 42, 0.9))',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: 12,
+              padding: '16px 20px',
+              marginTop: 12,
+              marginBottom: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Sparkles size={16} color="#10b981" />
+                    <b style={{ fontSize: 14, color: '#f8fafc', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                      All-In-One Grocery Basket Comparison ({todo?.length || '5'} items)
+                    </b>
+                    <span style={{ fontSize: 10, background: '#059669', color: '#fff', borderRadius: 4, padding: '2px 6px', fontWeight: 800 }}>
+                      COMBINED BASKET
+                    </span>
+                  </div>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                    Comparing single item vs complete grocery basket. Ordering all items together from one store eliminates duplicate delivery fees (saving ₹150+) and platform charges:
+                  </p>
+                </div>
+                {setTab && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ fontSize: 12, padding: '6px 12px' }}
+                    onClick={() => setTab('Master Cart')}
+                  >
+                    Open Master Cart ↗
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {basketData.single_store_comparisons.map((sc: any, idx: number) => {
+                  const isBest = idx === 0;
+                  return (
+                    <div
+                      key={sc.store}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 14px',
+                        background: isBest ? 'rgba(16, 185, 129, 0.12)' : 'rgba(30, 41, 59, 0.4)',
+                        border: isBest ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.05)',
+                        borderRadius: 8,
+                        fontSize: 13
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700, color: isBest ? '#34d399' : '#f8fafc' }}>{sc.store}</span>
+                        {isBest && (
+                          <span style={{ fontSize: 10, background: '#10b981', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 800 }}>
+                            BEST VALUE
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                          Items ₹{sc.subtotal} • Delivery {sc.delivery_fee === 0 ? <span style={{ color: '#34d399', fontWeight: 600 }}>FREE</span> : `₹${sc.delivery_fee}`} • Fees ₹{sc.handling_fee}
+                          {sc.coupon_discount > 0 ? <span style={{ color: '#fbbf24' }}> • Coupon {sc.coupon_code} (-₹{sc.coupon_discount})</span> : null}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <strong style={{ fontSize: 15, color: isBest ? '#34d399' : '#e2e8f0' }}>
+                          ₹{Number(sc.final_payable).toLocaleString()}
+                        </strong>
+                        <button
+                          type="button"
+                          className={isBest ? "primary" : "secondary"}
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: 12,
+                            background: isBest ? '#059669' : undefined,
+                            borderColor: isBest ? '#047857' : undefined
+                          }}
+                          onClick={() => onCheckoutStore ? onCheckoutStore(sc.store) : (todo?.[0] && buy(todo[0].id))}
+                        >
+                          Checkout ↗
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
