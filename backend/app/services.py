@@ -10,6 +10,29 @@ def normalize_price(v):
     s = re.sub(r'[^0-9.,-]', '', str(v)).replace(',', '')
     return float(s)
 
+def canonical_store_name(raw: str) -> str:
+    r = (raw or '').lower()
+    if 'amazon' in r: return 'Amazon India'
+    if 'flipkart' in r: return 'Flipkart'
+    if 'croma' in r: return 'Croma'
+    if 'vijay' in r: return 'Vijay Sales'
+    if 'reliance' in r or 'digital' in r: return 'Reliance Digital'
+    if 'bajaj' in r: return 'Bajaj Electronics'
+    if 'samsung' in r: return 'Samsung Store India'
+    if 'apple' in r: return 'Apple Store India'
+    if 'oneplus' in r: return 'OnePlus Official Store'
+    if 'sony' in r: return 'Sony Center India'
+    if 'blinkit' in r: return 'Blinkit'
+    if 'zepto' in r: return 'Zepto'
+    if 'instamart' in r or 'swiggy' in r: return 'Swiggy Instamart'
+    if 'bigbasket' in r or 'bbnow' in r: return 'BigBasket'
+    if 'dmart' in r: return 'DMart Ready'
+    if 'jiomart' in r: return 'JioMart'
+    if 'ajio' in r: return 'Ajio'
+    if 'myntra' in r: return 'Myntra'
+    if 'boat' in r: return 'boAt Lifestyle'
+    return (raw or 'Online Retailer').strip().title()
+
 def true_total(price, delivery=0, tax=0, fees=0, coupon=0, cashback=0):
     return round(max(0, price + delivery + tax + fees - coupon - cashback), 2)
 

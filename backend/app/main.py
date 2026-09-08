@@ -44,20 +44,6 @@ app.add_middleware(
 
 from fastapi.responses import JSONResponse
 
-def canonical_store_name(raw: str) -> str:
-    r = (raw or '').lower()
-    if 'amazon' in r: return 'Amazon India'
-    if 'flipkart' in r: return 'Flipkart'
-    if 'croma' in r: return 'Croma'
-    if 'vijay' in r: return 'Vijay Sales'
-    if 'reliance' in r: return 'Reliance Digital'
-    if 'bajaj' in r: return 'Bajaj Electronics'
-    if 'samsung' in r: return 'Samsung Store India'
-    if 'apple' in r: return 'Apple Store India'
-    if 'oneplus' in r: return 'OnePlus Official Store'
-    if 'sony' in r: return 'Sony Center India'
-    return (raw or 'Online Retailer').strip().title()
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
