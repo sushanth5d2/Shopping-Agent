@@ -47,6 +47,8 @@ services:
       SHOPAGENT_ALLOW_DEMO_SEED: "true"
       SHOPAGENT_TELEGRAM_BOT_TOKEN: ${SHOPAGENT_TELEGRAM_BOT_TOKEN:-}
       SHOPAGENT_TELEGRAM_CHAT_ID: ${SHOPAGENT_TELEGRAM_CHAT_ID:-}
+    ports:
+      - "${SHOPAGENT_API_PORT:-8000}:8000"
     shm_size: '1gb'
     network_mode: "host"
     depends_on:
@@ -91,6 +93,8 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
       BACKEND_INTERNAL_URL: http://127.0.0.1:8000
+    ports:
+      - "${SHOPAGENT_WEB_PORT:-3000}:3000"
     network_mode: "host"
     depends_on:
       backend:
