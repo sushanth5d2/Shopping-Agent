@@ -1,4 +1,5 @@
-import os, time, logging, re
+import os, time, logging, re, socket
+from urllib.parse import urlparse, urlunparse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from .config import settings
@@ -8,7 +9,32 @@ logger = logging.getLogger('uvicorn')
 class Base(DeclarativeBase):
     pass
 
-def make_engine(url: str, timeout: int = 5):
+def resolve_url_to_ipv4(url: str) -> str:
+    """Resolves URL hostname to direct IPv4 to eliminate container IPv6 blackhole timeouts."""
+    if not url or url.startswith('sqlite'):
+        return url
+    try:
+        p = urlparse(url)
+        if not p.hostname or p.hostname in ('127.0.0.1', 'localhost'):
+            return url
+        addr_info = socket.getaddrinfo(p.hostname, p.port or 5432, socket.AF_INET, socket.SOCK_STREAM)
+        if addr_info:
+            ip = addr_info[0][4][0]
+            port_str = f":{p.port}" if p.port else ""
+            user_str = f"{p.username}" if p.username else ""
+            if p.password:
+                user_str += f":{p.password}"
+            if user_str:
+                user_str += "@"
+            netloc = f"{user_str}{ip}{port_str}"
+            return urlunparse((p.scheme, netloc, p.path, p.params, p.query, p.fragment))
+    except Exception:
+        pass
+    return url
+
+def make_engine(url: str, timeout: int = 3):
+    if url.startswith('sqlite'):
+        return create_engine(url, pool_pre_ping=True)
     connect_args = {}
     if 'postgresql' in url:
         connect_args['connect_timeout'] = timeout
@@ -16,6 +42,9 @@ def make_engine(url: str, timeout: int = 5):
 
 def get_candidate_urls():
     env_url = os.getenv('SHOPAGENT_DATABASE_URL') or os.getenv('DATABASE_URL')
+    if env_url and env_url.startswith('sqlite'):
+        return [env_url]
+
     raw_urls = []
     if env_url:
         u = env_url.replace('postgresql://', 'postgresql+psycopg://', 1)
@@ -29,15 +58,14 @@ def get_candidate_urls():
     
     if raw_urls:
         try:
-            from urllib.parse import urlparse
             p = urlparse(raw_urls[0])
             h = p.hostname or 'db'
             port = p.port or 5432
             pwd = p.password or base_pass
             
             alt_hosts = [h]
-            if h == 'db': alt_hosts.extend(['shopagent-db', 'postgres'])
-            elif h in ('shopagent-db', 'postgres'): alt_hosts.extend(['db'])
+            if h == 'db': alt_hosts.extend(['shopagent-db', 'postgres', '127.0.0.1'])
+            elif h in ('shopagent-db', 'postgres'): alt_hosts.extend(['db', '127.0.0.1'])
             elif h in ('localhost', '127.0.0.1'): alt_hosts.extend(['localhost', '127.0.0.1'])
             
             for host in alt_hosts:
@@ -66,7 +94,7 @@ def get_candidate_urls():
 
 # Initialize with the first candidate
 _initial_urls = get_candidate_urls()
-engine = make_engine(_initial_urls[0], timeout=5)
+engine = make_engine(_initial_urls[0], timeout=3)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_engine():
@@ -84,12 +112,26 @@ def get_db():
 def wait_for_db(max_retries=10, delay=1.0):
     """Iterates through candidate hosts and credentials until PostgreSQL is connected, with fallback to SQLite."""
     global engine, SessionLocal
-    candidates = get_candidate_urls()
+    raw_candidates = get_candidate_urls()
+    if raw_candidates and raw_candidates[0].startswith('sqlite'):
+        test_engine = create_engine(raw_candidates[0], pool_pre_ping=True)
+        engine = test_engine
+        SessionLocal.configure(bind=engine)
+        return True
+    
+    # Pre-resolve to direct IPv4 addresses to bypass Docker DNS/IPv6 connection timeouts
+    candidates = []
+    for u in raw_candidates:
+        ipv4_u = resolve_url_to_ipv4(u)
+        if ipv4_u != u and ipv4_u not in candidates:
+            candidates.append(ipv4_u)
+        if u not in candidates:
+            candidates.append(u)
     
     for attempt in range(1, max_retries + 1):
         for url in candidates:
             try:
-                test_engine = make_engine(url, timeout=5)
+                test_engine = make_engine(url, timeout=3)
                 with test_engine.connect() as conn:
                     engine = test_engine
                     SessionLocal.configure(bind=engine)
