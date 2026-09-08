@@ -42,55 +42,18 @@ def make_engine(url: str, timeout: int = 3):
 
 def get_candidate_urls():
     env_url = os.getenv('SHOPAGENT_DATABASE_URL') or os.getenv('DATABASE_URL')
-    if env_url and env_url.startswith('sqlite'):
-        return [env_url]
-
-    raw_urls = []
     if env_url:
         u = env_url.replace('postgresql://', 'postgresql+psycopg://', 1)
-        raw_urls.append(u)
-    
-    if settings.database_url and settings.database_url not in raw_urls:
-        raw_urls.append(settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1))
+        return [u]
+
+    if settings.database_url:
+        return [settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1)]
 
     base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
-    candidates = list(raw_urls)
-    
-    if raw_urls:
-        try:
-            p = urlparse(raw_urls[0])
-            h = p.hostname or 'db'
-            port = p.port or 5432
-            pwd = p.password or base_pass
-            
-            alt_hosts = [h]
-            if h == 'db': alt_hosts.extend(['shopagent-db', 'postgres', '127.0.0.1'])
-            elif h in ('shopagent-db', 'postgres'): alt_hosts.extend(['db', '127.0.0.1'])
-            elif h in ('localhost', '127.0.0.1'): alt_hosts.extend(['localhost', '127.0.0.1'])
-            
-            for host in alt_hosts:
-                candidates.append(f"postgresql+psycopg://shopagent:{pwd}@{host}:{port}/shopagent")
-                candidates.append(f"postgresql+psycopg://shopagent@{host}:{port}/shopagent")
-                candidates.append(f"postgresql+psycopg://postgres:{pwd}@{host}:{port}/shopagent")
-                candidates.append(f"postgresql+psycopg://postgres@{host}:{port}/shopagent")
-                candidates.append(f"postgresql+psycopg://postgres:{pwd}@{host}:{port}/postgres")
-                candidates.append(f"postgresql+psycopg://postgres@{host}:{port}/postgres")
-                candidates.append(f"postgresql+psycopg://shopagent:{pwd}@{host}:{port}/postgres")
-        except Exception:
-            pass
-    else:
-        for host in ['db', 'shopagent-db', 'localhost', '127.0.0.1']:
-            candidates.append(f"postgresql+psycopg://shopagent:{base_pass}@{host}:5432/shopagent")
-            candidates.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/shopagent")
-            candidates.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/postgres")
-
-    seen = set()
-    deduped = []
-    for x in candidates:
-        if x not in seen:
-            seen.add(x)
-            deduped.append(x)
-    return deduped
+    return [
+        f"postgresql+psycopg://shopagent:{base_pass}@localhost:5432/shopagent",
+        f"postgresql+psycopg://shopagent:{base_pass}@127.0.0.1:5432/shopagent",
+    ]
 
 # Initialize with the first candidate
 _initial_urls = get_candidate_urls()
@@ -109,25 +72,25 @@ def get_db():
     finally:
         db.close()
 
-def wait_for_db(max_retries=10, delay=1.0):
-    """Iterates through candidate hosts and credentials until PostgreSQL is connected, with fallback to SQLite."""
+def wait_for_db(max_retries=15, delay=1.0):
+    """Waits for PostgreSQL database to be ready and connects, with fallback to SQLite."""
     global engine, SessionLocal
     raw_candidates = get_candidate_urls()
-    if raw_candidates and raw_candidates[0].startswith('sqlite'):
-        test_engine = create_engine(raw_candidates[0], pool_pre_ping=True)
-        engine = test_engine
+    target_url = raw_candidates[0]
+
+    if target_url.startswith('sqlite'):
+        engine = create_engine(target_url, pool_pre_ping=True)
         SessionLocal.configure(bind=engine)
         return True
-    
-    # Pre-resolve to direct IPv4 addresses to bypass Docker DNS/IPv6 connection timeouts
+
+    # Pre-resolve to direct IPv4 address to bypass Docker DNS/IPv6 connection timeouts
     candidates = []
-    for u in raw_candidates:
-        ipv4_u = resolve_url_to_ipv4(u)
-        if ipv4_u != u and ipv4_u not in candidates:
-            candidates.append(ipv4_u)
-        if u not in candidates:
-            candidates.append(u)
-    
+    ipv4_u = resolve_url_to_ipv4(target_url)
+    if ipv4_u and ipv4_u != target_url:
+        candidates.append(ipv4_u)
+    candidates.append(target_url)
+
+    masked = re.sub(r':([^@]+)@', ':****@', target_url)
     for attempt in range(1, max_retries + 1):
         for url in candidates:
             try:
@@ -135,27 +98,24 @@ def wait_for_db(max_retries=10, delay=1.0):
                 with test_engine.connect() as conn:
                     engine = test_engine
                     SessionLocal.configure(bind=engine)
-                    masked = re.sub(r':([^@]+)@', ':****@', url)
                     logger.info(f"Connected to PostgreSQL database: {masked}")
                     print(f"INFO: Connected to PostgreSQL database: {masked}", flush=True)
                     return True
-            except Exception as e:
-                if attempt == 1:
-                    masked = re.sub(r':([^@]+)@', ':****@', url)
-                    logger.debug(f"DB connect attempt to {masked} failed: {e}")
-                    print(f"DEBUG: DB connect attempt to {masked} failed: {type(e).__name__} - {e}", flush=True)
-        
+            except Exception:
+                pass
         if attempt < max_retries:
-            logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
-            print(f"WARNING: Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...", flush=True)
+            if attempt == 1 or attempt % 5 == 0:
+                logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
+                print(f"INFO: Waiting for database container to be ready (attempt {attempt}/{max_retries})...", flush=True)
             time.sleep(delay)
-    
-    # Graceful fallback to SQLite so the backend NEVER hangs or fails to start
+
+    # Graceful fallback to SQLite so backend NEVER fails to start
     logger.warning("PostgreSQL could not be reached after retries. Initializing resilient SQLite database fallback.")
     print("WARNING: Initializing resilient SQLite database fallback (sqlite:///shopagent.db)", flush=True)
     engine = create_engine("sqlite:///shopagent.db", pool_pre_ping=True)
     SessionLocal.configure(bind=engine)
     return True
+
 
 def auto_migrate_schema(eng):
     """Safely adds missing columns and alters constraints on existing PostgreSQL tables without data loss."""
