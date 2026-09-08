@@ -32,12 +32,14 @@ def resolve_url_to_ipv4(url: str) -> str:
         pass
     return url
 
-def make_engine(url: str, timeout: int = 3):
+def make_engine(url: str, timeout: int = 5):
     if url.startswith('sqlite'):
         return create_engine(url, pool_pre_ping=True)
     connect_args = {}
     if 'postgresql' in url:
         connect_args['connect_timeout'] = timeout
+        if 'sslmode' not in url:
+            connect_args['sslmode'] = 'disable'
     return create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
 
 def get_candidate_urls():
@@ -51,13 +53,13 @@ def get_candidate_urls():
 
     base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
     return [
-        f"postgresql+psycopg://shopagent:{base_pass}@localhost:5432/shopagent",
-        f"postgresql+psycopg://shopagent:{base_pass}@127.0.0.1:5432/shopagent",
+        f"postgresql+psycopg://shopagent:{base_pass}@localhost:5432/shopagent?sslmode=disable",
+        f"postgresql+psycopg://shopagent:{base_pass}@127.0.0.1:5432/shopagent?sslmode=disable",
     ]
 
 # Initialize with the first candidate
 _initial_urls = get_candidate_urls()
-engine = make_engine(_initial_urls[0], timeout=3)
+engine = make_engine(_initial_urls[0], timeout=5)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_engine():
@@ -72,7 +74,7 @@ def get_db():
     finally:
         db.close()
 
-def wait_for_db(max_retries=15, delay=1.0):
+def wait_for_db(max_retries=20, delay=1.5):
     """Waits for PostgreSQL database to be ready and connects, with fallback to SQLite."""
     global engine, SessionLocal
     raw_candidates = get_candidate_urls()
@@ -86,23 +88,37 @@ def wait_for_db(max_retries=15, delay=1.0):
     # Pre-resolve to direct IPv4 address to bypass Docker DNS/IPv6 connection timeouts
     candidates = []
     ipv4_u = resolve_url_to_ipv4(target_url)
-    if ipv4_u and ipv4_u != target_url:
+    if ipv4_u and ipv4_u != target_url and ipv4_u not in candidates:
         candidates.append(ipv4_u)
-    candidates.append(target_url)
+    if target_url not in candidates:
+        candidates.append(target_url)
 
-    masked = re.sub(r':([^@]+)@', ':****@', target_url)
+    # If host is db or shopagent-db, add alias alternative
+    if '@db:' in target_url:
+        alt = target_url.replace('@db:', '@shopagent-db:')
+        if alt not in candidates:
+            candidates.append(alt)
+    elif '@shopagent-db:' in target_url:
+        alt = target_url.replace('@shopagent-db:', '@db:')
+        if alt not in candidates:
+            candidates.append(alt)
+
+    masked_target = re.sub(r':([^@]+)@', ':****@', target_url)
     for attempt in range(1, max_retries + 1):
         for url in candidates:
+            conn_masked = re.sub(r':([^@]+)@', ':****@', url)
             try:
-                test_engine = make_engine(url, timeout=3)
+                test_engine = make_engine(url, timeout=5)
                 with test_engine.connect() as conn:
                     engine = test_engine
                     SessionLocal.configure(bind=engine)
-                    logger.info(f"Connected to PostgreSQL database: {masked}")
-                    print(f"INFO: Connected to PostgreSQL database: {masked}", flush=True)
+                    logger.info(f"Connected to PostgreSQL database: {conn_masked}")
+                    print(f"INFO: Connected to PostgreSQL database: {conn_masked}", flush=True)
                     return True
-            except Exception:
-                pass
+            except Exception as exc:
+                if attempt == 1 or attempt % 5 == 0:
+                    print(f"DEBUG: Connect attempt to {conn_masked} failed: {type(exc).__name__} - {exc}", flush=True)
+
         if attempt < max_retries:
             if attempt == 1 or attempt % 5 == 0:
                 logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
