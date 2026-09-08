@@ -206,8 +206,8 @@ def product_summary(db, pid, include_details: bool = True):
   seller=db.get(Seller,l.seller_id) if l.seller_id else None; total=true_total(l.price,l.delivery,l.tax,l.fees,l.coupon,l.cashback)
   l_coupons = get_verified_store_coupons(s_canon, l.price, p.name, live_coupon=l.coupon)
   out.append({'listing_id':l.id,'store':s_canon,'product':p.name,'url':l.url,'match_score':100,'price':l.price,'delivery':l.delivery,'discounts':l.coupon,'cashback':l.cashback,'true_total':total,'seller':seller.name if seller else 'Unknown','seller_rating':seller.rating if seller else 0,'warranty':l.warranty,'returns':l.returns,'delivery_days':l.delivery_days,'stock':l.stock,'condition':l.condition,'observed_at':l.observed_at,'live':True,'card_offers':get_store_card_offers(s_canon,l.price,p.name),'coupons':l_coupons})
- if not out:raise HTTPException(404,'No live listings available for this product')
- best_item = min(out,key=lambda x:x['true_total'])
+ out.sort(key=lambda x: (x['true_total'], 1 if 'Primary Live Store' in x['store'] else 0))
+ best_item = out[0]
  p_cat = p.category if (p.category and p.category not in ('ELECTRONICS', 'General')) else classify_product_category(p.name)
  if is_laptop_product(p.name):
   p_cat = 'LAPTOP'
@@ -1218,10 +1218,20 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
  db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Purchase initiated for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). User action required to complete. Verified savings: ₹{savings_val:,.2f}."))
  db.commit()
  store_target_url = best.get('url', '')
- if not store_target_url:
+ if not store_target_url or 'google.com/search' in store_target_url:
+  direct_l = db.query(StoreListing).filter(
+   StoreListing.product_id == it.product_id,
+   ~StoreListing.url.contains('google.com/search')
+  ).first()
+  if direct_l and direct_l.url:
+   store_target_url = direct_l.url
+   st_obj = db.get(Store, direct_l.store_id)
+   if st_obj:
+    best['store'] = st_obj.name
+ if not store_target_url or 'google.com/search' in store_target_url:
   clean_q = __import__("urllib.parse").parse.quote_plus(it.name[:40])
   st_name = (best.get('store') or '').lower()
-  if 'amazon' in st_name:
+  if 'amazon' in st_name or 'amazon' in (it.name or '').lower():
    store_target_url = f"https://www.amazon.in/s?k={clean_q}"
   elif 'flipkart' in st_name:
    store_target_url = f"https://www.flipkart.com/search?q={clean_q}"
@@ -1242,7 +1252,7 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   elif 'myntra' in st_name:
    store_target_url = f"https://www.myntra.com/{clean_q}"
   else:
-   store_target_url = f"https://www.google.com/search?q={clean_q}+buy+online"
+   store_target_url = f"https://www.amazon.in/s?k={clean_q}"
  return {
   'status': 'PENDING_USER_ACTION',
   'order_number': order_num,

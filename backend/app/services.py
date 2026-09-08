@@ -4312,8 +4312,11 @@ def basket(items, mode='CHEAPEST'):
     best = None
     for combo in product(*[x['listings'] for x in items]):
         stores = {}
-        for x in combo:
-            stores[x['store']] = stores.get(x['store'], 0) + x['total']
+        items_by_store = {}
+        for idx, x in enumerate(combo):
+            sname = x['store']
+            stores[sname] = stores.get(sname, 0) + x['total']
+            items_by_store.setdefault(sname, []).append(items[idx].get('item_id'))
 
         total_payable = 0.0
         store_details = {}
@@ -4325,18 +4328,25 @@ def basket(items, mode='CHEAPEST'):
 
         score = (total_payable, len(stores)) if mode != 'FEWEST_STORES' else (len(stores), total_payable)
         if best is None or score < best[0]:
-            best = (score, stores, store_details, total_payable)
+            best = (score, stores, store_details, total_payable, items_by_store)
 
     # 4. Check if a single store beats or matches the combo
-    if single_store_comparisons and (mode == 'FEWEST_STORES' or single_store_comparisons[0]['final_payable'] <= best[3]):
+    if single_store_comparisons and (mode == 'FEWEST_STORES' or (best and single_store_comparisons[0]['final_payable'] <= best[3])):
         best_single = single_store_comparisons[0]
         winning_stores = {best_single['store']: best_single['final_payable']}
         winning_details = {best_single['store']: best_single}
+        winning_items_by_store = {best_single['store']: [it.get('item_id') for it in items]}
         final_total = best_single['final_payable']
-    else:
+    elif best:
         winning_stores = {k: v['final_payable'] for k, v in best[2].items()}
         winning_details = best[2]
+        winning_items_by_store = best[4]
         final_total = best[3]
+    else:
+        winning_stores = {}
+        winning_details = {}
+        winning_items_by_store = {}
+        final_total = 0.0
 
     individual_sum = sum(min(x['total'] for x in i['listings']) for i in items)
     savings = round(max(0, individual_sum - final_total), 2) if final_total <= individual_sum else 0.0
@@ -4348,7 +4358,8 @@ def basket(items, mode='CHEAPEST'):
         'single_store_comparisons': single_store_comparisons,
         'individual_cheapest': round(individual_sum, 2),
         'savings': savings,
-        'strategy': mode
+        'strategy': mode,
+        'store_items': winning_items_by_store
     }
 
 # ==========================================================
@@ -4599,8 +4610,9 @@ class PurchasePolicy:
         sr = listing.get('seller_rating', 0.0) if isinstance(listing, dict) else getattr(listing, 'seller_rating', 0.0)
         if item.max_price is not None and total > item.max_price: return PolicyResult(False, 'Final total exceeds maximum price.')
         if sr > 0 and sr < pref.min_seller_rating: return PolicyResult(False, 'Seller rating is below configured minimum.')
-        if monthly_spend + total > pref.monthly_max: return PolicyResult(False, 'Monthly spending limit would be exceeded.')
-        if total > pref.global_max_order: return PolicyResult(False, 'Global maximum per order exceeded.')
-        if item.purchase_mode == 'AUTO' and not pref.global_auto_buy: return PolicyResult(False, 'Auto checkout is not globally enabled.')
+        if item.purchase_mode == 'AUTO':
+            if not pref.global_auto_buy: return PolicyResult(False, 'Auto checkout is not globally enabled.')
+            if monthly_spend + total > pref.monthly_max: return PolicyResult(False, 'Monthly spending limit would be exceeded.')
+            if total > pref.global_max_order: return PolicyResult(False, 'Global maximum per order exceeded.')
         if rule and rule.max_price is not None and total > rule.max_price: return PolicyResult(False, 'Applicable purchase rule maximum exceeded.')
         return PolicyResult(True, 'All deterministic purchase rules passed.')

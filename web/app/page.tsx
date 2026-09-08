@@ -2031,7 +2031,14 @@ function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [],
   const savings = Number(data?.savings || 0);
 
   const handleCheckoutStore = (storeName: string) => {
-    const matched = todo.find((it: any) => it.decision?.best_store?.toLowerCase().includes(storeName.toLowerCase())) || todo[0];
+    const storeItemIds = data?.store_items?.[storeName] || [];
+    let matched = todo.find((it: any) => storeItemIds.includes(it.id));
+    if (!matched) {
+      matched = todo.find((it: any) => {
+        const itemStore = (it.decision?.best_store || it.best_store || '').toLowerCase();
+        return itemStore.includes(storeName.toLowerCase());
+      }) || todo[0];
+    }
     if (matched) {
       buyItem(matched.id);
     }
