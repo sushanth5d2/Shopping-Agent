@@ -884,34 +884,6 @@ def batch_process(p:BatchIn,u=Depends(current_user),db:Session=Depends(get_db)):
 
 @app.post('/api/products/url-analyze')
 def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db)):
- # Fast Cache: Check if this URL was recently observed (< 2 hours) to survive refresh/re-submit instantly
- clean_u = p.url.split('?')[0].rstrip('/') if '?' in p.url else p.url.rstrip('/')
- existing_l = db.query(StoreListing).filter(
-  (StoreListing.url == p.url) | (StoreListing.url.startswith(clean_u))
- ).order_by(StoreListing.observed_at.desc()).first()
-
- if existing_l and existing_l.price > 0 and existing_l.observed_at and (datetime.now(timezone.utc) - (existing_l.observed_at.replace(tzinfo=timezone.utc) if existing_l.observed_at.tzinfo is None else existing_l.observed_at) < timedelta(hours=2)):
-  product = db.get(Product, existing_l.product_id)
-  if product and product.name and not re.search(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]', product.name) and product.name != 'Product Online':
-   sl=user_list(db,u)
-   item = db.query(ShoppingItem).filter_by(list_id=sl.id, product_id=product.id).first()
-   target_p = p.target_price
-   if p.monitor and (target_p is None or target_p <= 0) and existing_l.price > 0:
-    target_p = round(existing_l.price * 0.95, -1) if existing_l.price > 100 else round(existing_l.price * 0.95, 2)
-   if not item:
-    item = ShoppingItem(list_id=sl.id, name=product.name[:500], quantity=1, target_price=target_p, max_price=p.max_price, mode='MONITOR' if p.monitor else 'BUY_NOW', purchase_mode=p.purchase_mode, product_id=product.id)
-    db.add(item); db.flush()
-   elif p.monitor:
-    item.mode = 'MONITOR'
-    if target_p: item.target_price = target_p
-   if p.monitor:
-    t = db.query(MonitoringTask).filter_by(item_id=item.id).first()
-    if not t:
-     t = MonitoringTask(item_id=item.id, status='WATCHING', last_checked=datetime.now(timezone.utc), next_check=datetime.now(timezone.utc)+timedelta(minutes=360))
-     db.add(t)
-   db.commit()
-   return {'item_id':item.id,'product':{'id':product.id,'name':product.name,'brand':product.brand,'model':product.model,'variant':product.variant,'gtin':product.gtin},'source':{'url':p.url,'price':existing_l.price,'true_total':existing_l.price},'comparison':product_summary(db,product.id),'monitoring':p.monitor}
-
  try:
   validate_public_url(p.url)
   source=connector_for(p.url).observe_url(p.url)
