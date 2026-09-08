@@ -663,28 +663,16 @@ def duckduckgo_search(query: str, timeout: int = 6) -> list[dict]:
     return results
 
 def estimate_item_market_price(name: str, category: str, user_target: float | None = None) -> float:
-    """Estimates market price using genuine live web search, user target, or authentic everyday retail benchmarks."""
+    """Estimates market price using authentic Indian retail benchmarks or genuine live web search."""
     if user_target and user_target > 0:
         return float(user_target)
     
     clean = re.split(r'[:|;(\[]', name)[0].strip() or name[:40]
     cat_upper = (category or '').upper()
     is_groc = 'GROCER' in cat_upper or detect_product_domain(name) == 'GROCERY'
-    
-    try:
-        search_kw = f"{clean} price Blinkit Zepto Instamart BigBasket India" if is_groc else f"{clean} price India Flipkart Amazon"
-        results = duckduckgo_search(search_kw, timeout=6)
-        for r in results:
-            p = r.get('price', 0)
-            if p > 0:
-                if is_groc and (p > 1500 or p < 5):
-                    continue
-                return float(p)
-    except Exception:
-        pass
-
-    # Reliable Indian retail benchmark baseline for everyday grocery staples when search returns encyclopedic pages
     nl = name.lower()
+
+    # 1. Instant Indian grocery retail benchmarks (0ms latency, zero timeout failure)
     if is_groc:
         if 'almond' in nl or 'badam' in nl:
             return 450.0 if ('500' in nl or 'kg' in nl) else 250.0
@@ -694,6 +682,8 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
             return 550.0 if ('500' in nl or 'kg' in nl) else 320.0
         if 'pista' in nl:
             return 600.0 if ('500' in nl or 'kg' in nl) else 350.0
+        if 'raisin' in nl or 'kishmish' in nl:
+            return 180.0
         if 'jam' in nl:
             return 45.0 if ('30' in nl or 'small' in nl) else 85.0
         if 'bread' in nl:
@@ -738,6 +728,31 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
             return 140.0
         if 'coffee' in nl:
             return 175.0
+        if 'biscuit' in nl or 'cookie' in nl:
+            return 30.0
+        if 'soap' in nl:
+            return 45.0
+        if 'shampoo' in nl:
+            return 160.0
+        if 'paste' in nl or 'toothpaste' in nl:
+            return 75.0
+        if 'detergent' in nl or 'surf' in nl:
+            return 120.0
+
+    # 2. Live web search with tight timeout
+    try:
+        search_kw = f"{clean} price Blinkit Zepto Instamart BigBasket India" if is_groc else f"{clean} price India Flipkart Amazon"
+        results = duckduckgo_search(search_kw, timeout=3)
+        for r in results:
+            p = r.get('price', 0)
+            if p > 0:
+                if is_groc and (p > 1500 or p < 5):
+                    continue
+                return float(p)
+    except Exception:
+        pass
+
+    if is_groc:
         return 50.0
 
     return 0.0
@@ -935,19 +950,20 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
         ('Zepto', 'zeptonow.com', 'ZEPTO 10-MIN', f'https://www.zeptonow.com/search?q={q_slug}', 'Instant 10-Minute Cold Chain Delivery', 'Instant return on delivery', '10-15 mins'),
     ]
 
-    # Live multi-store search via DuckDuckGo
+    # Live multi-store search via DuckDuckGo (only for non-grocery or when base price is unknown)
     is_groc = eff_domain == 'GROCERY' or 'GROCER' in (category or '').upper()
     search_queries = []
-    if is_groc:
-        search_queries.append(f"{clean_q} price Blinkit Zepto Instamart BigBasket India")
-    else:
-        search_queries.append(f"{clean_q} price Flipkart")
-        search_queries.append(f"{clean_q} price Croma Reliance Digital Vijay Sales")
+    if not is_groc or bp <= 0:
+        if is_groc:
+            search_queries.append(f"{clean_q} price Blinkit Zepto Instamart BigBasket India")
+        else:
+            search_queries.append(f"{clean_q} price Flipkart")
+            search_queries.append(f"{clean_q} price Croma Reliance Digital Vijay Sales")
 
     live_hits = []
     for sq in search_queries:
         try:
-            hits = duckduckgo_search(sq, timeout=6)
+            hits = duckduckgo_search(sq, timeout=3)
             live_hits.extend(hits)
         except Exception:
             pass
@@ -987,10 +1003,12 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
     # Grocery quick commerce platforms multi-store tracking
     if is_groc and bp > 0:
         grocery_quick_stores = [
-            ('BigBasket', 'bigbasket.com', 'FRESH DELIVERY', f'https://www.bigbasket.com/ps/?q={q_slug}', round(bp * 0.96, 2), 'Scheduled / 15-min', 'bbNow Quality Checked'),
+            ('BigBasket', 'bigbasket.com', 'FRESH DELIVERY', f'https://www.bigbasket.com/ps/?q={q_slug}', round(bp * 0.95, 2), 'Scheduled / 15-min', 'bbNow Quality Checked'),
             ('Blinkit', 'blinkit.com', '10 MIN DELIVERY', f'https://blinkit.com/s/?q={q_slug}', round(bp * 0.98, 2), '10-15 mins', '10-Min Flash Delivery'),
+            ('Flipkart Minutes', 'flipkart.com/minutes', '10 MIN DELIVERY', f'https://www.flipkart.com/search?q={q_slug}&marketplace=GROCERY', round(bp * 0.96, 2), '10-15 mins', 'Flipkart Minutes Verified'),
             ('Zepto', 'zeptonow.com', '10 MIN DELIVERY', f'https://www.zeptonow.com/search?q={q_slug}', bp, '10 mins', 'Zepto Cold Chain Delivery'),
-            ('Swiggy Instamart', 'swiggy.com', 'INSTANT DELIVERY', f'https://www.swiggy.com/instamart/search?query={q_slug}', round(bp * 1.02, 2), '15 mins', 'Swiggy Verified Fresh'),
+            ('Swiggy Instamart', 'swiggy.com', 'INSTANT DELIVERY', f'https://www.swiggy.com/instamart/search?query={q_slug}', round(bp * 1.01, 2), '15 mins', 'Swiggy Verified Fresh'),
+            ('Amazon Fresh', 'amazon.in/fresh', 'SCHEDULED / 2-HR', f'https://www.amazon.in/alm/storefront?almBrandId=ctnow&q={q_slug}', round(bp * 0.97, 2), '2-Hour Delivery', 'Amazon Fresh 100% Quality Checked'),
         ]
         for sname, domain, badge, search_url, sprice, dtime, warranty in grocery_quick_stores:
             if not any(r['name'] == sname for r in results):
@@ -4220,6 +4238,24 @@ def calculate_store_checkout(store_name: str, subtotal: float) -> dict:
         else:
             delivery_fee = 0.0
 
+    elif 'minutes' in s or 'flipkart minutes' in s:
+        free_delivery_threshold = 199.0
+        handling_fee = 4.0
+        delivery_time = '10-15 mins'
+        if subtotal < 99.0:
+            small_cart_fee = 15.0
+            delivery_fee = 25.0
+        elif subtotal < 199.0:
+            delivery_fee = 25.0
+        else:
+            delivery_fee = 0.0
+
+    elif 'fresh' in s or 'amazon fresh' in s:
+        free_delivery_threshold = 249.0
+        handling_fee = 0.0
+        delivery_time = '2-Hour Delivery'
+        delivery_fee = 0.0 if subtotal >= 249.0 else 30.0
+
     elif 'amazon' in s:
         free_delivery_threshold = 499.0
         handling_fee = 0.0
@@ -4310,6 +4346,7 @@ def basket(items, mode='CHEAPEST'):
 
     # 3. Evaluate multi-item combinations with checkout cost
     best = None
+    qc_stores = {'blinkit', 'zepto', 'bigbasket', 'swiggy instamart', 'flipkart minutes', 'amazon fresh'}
     for combo in product(*[x['listings'] for x in items]):
         stores = {}
         items_by_store = {}
@@ -4326,12 +4363,20 @@ def basket(items, mode='CHEAPEST'):
             total_payable += sc['final_payable']
         total_payable = round(total_payable, 2)
 
-        score = (total_payable, len(stores)) if mode != 'FEWEST_STORES' else (len(stores), total_payable)
+        # Penalize splitting quick-commerce groceries across multiple stores
+        # (each extra store adds delivery friction, rider dispatch, and platform fees)
+        active_qc = sum(1 for s in stores if any(q in s.lower() for q in ['blinkit', 'zepto', 'bigbasket', 'instamart', 'minutes', 'fresh']))
+        qc_penalty = (active_qc - 1) * 50.0 if active_qc > 1 else 0.0
+        eval_payable = total_payable + qc_penalty
+
+        score = (eval_payable, len(stores)) if mode != 'FEWEST_STORES' else (len(stores), eval_payable)
         if best is None or score < best[0]:
             best = (score, stores, store_details, total_payable, items_by_store)
 
     # 4. Check if a single store beats or matches the combo
-    if single_store_comparisons and (mode == 'FEWEST_STORES' or (best and single_store_comparisons[0]['final_payable'] <= best[3])):
+    # For grocery items, strictly enforce single-store basket fulfillment to eliminate duplicate delivery charges
+    is_mostly_grocery = sum(1 for it in items if classify_product_category(it.get('name', '')) == 'GROCERY' or detect_product_domain(it.get('name', '')) == 'GROCERY') >= len(items) * 0.5
+    if single_store_comparisons and (is_mostly_grocery or mode == 'FEWEST_STORES' or (best and single_store_comparisons[0]['final_payable'] <= best[3] * 1.08)):
         best_single = single_store_comparisons[0]
         winning_stores = {best_single['store']: best_single['final_payable']}
         winning_details = {best_single['store']: best_single}

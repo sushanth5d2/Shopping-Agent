@@ -346,12 +346,13 @@ def find_or_create_product_for_name(db, name: str, default_price: float | None =
   if not best_match.category or best_match.category in ('ELECTRONICS', 'General'):
    best_match.category = det_cat
    best_match.specs = f"Category: {det_cat}"
-
-  # Check if best_match has obsolete/fallback prices while default_price is a genuine verified price
-  if default_price and default_price > 0:
-   cur_listings = db.query(StoreListing).filter_by(product_id=best_match.id).all()
-   cur_prices = [l.price for l in cur_listings if l.price > 0]
-   if not cur_prices or any(abs(cp - default_price) / max(cp, default_price) > 0.35 for cp in cur_prices):
+  cur_listings = db.query(StoreListing).filter_by(product_id=best_match.id).all()
+  cur_prices = [l.price for l in cur_listings if l.price > 0 and l.stock > 0]
+  if not cur_prices:
+   eff_p = default_price if (default_price and default_price > 0) else estimate_item_market_price(best_match.name, best_match.category or det_cat)
+   sync_product_store_prices(db, best_match, eff_p, best_match.category or det_cat, best_match.name, pincode)
+  elif default_price and default_price > 0:
+   if any(abs(cp - default_price) / max(cp, default_price) > 0.35 for cp in cur_prices):
     sync_product_store_prices(db, best_match, default_price, best_match.category or det_cat, best_match.name, pincode)
   return best_match
 
@@ -1232,9 +1233,15 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   clean_q = __import__("urllib.parse").parse.quote_plus(it.name[:40])
   st_name = (best.get('store') or '').lower()
   if 'amazon' in st_name or 'amazon' in (it.name or '').lower():
-   store_target_url = f"https://www.amazon.in/s?k={clean_q}"
+   if 'fresh' in st_name:
+    store_target_url = f"https://www.amazon.in/alm/storefront?almBrandId=ctnow&q={clean_q}"
+   else:
+    store_target_url = f"https://www.amazon.in/s?k={clean_q}"
   elif 'flipkart' in st_name:
-   store_target_url = f"https://www.flipkart.com/search?q={clean_q}"
+   if 'minute' in st_name or 'grocery' in st_name:
+    store_target_url = f"https://www.flipkart.com/search?q={clean_q}&marketplace=GROCERY"
+   else:
+    store_target_url = f"https://www.flipkart.com/search?q={clean_q}"
   elif 'blinkit' in st_name:
    store_target_url = f"https://blinkit.com/s/?q={clean_q}"
   elif 'zepto' in st_name:
@@ -1379,6 +1386,21 @@ def get_basket(strategy: str = 'CHEAPEST', item_ids: str | None = None, u=Depend
   if id_list:
    q = q.filter(ShoppingItem.id.in_(id_list))
  for it in q.all():
-  if not it.product_id:continue
-  c=product_summary(db,it.product_id,include_details=False);data.append({'name':it.name,'item_id':it.id,'listings':[{'store':x['store'],'total':x['true_total']} for x in c['listings']]})
+  if not it.product_id: continue
+  try:
+   c = product_summary(db, it.product_id, include_details=False)
+   if c and c.get('listings'):
+    data.append({'name': it.name, 'item_id': it.id, 'listings': [{'store': x['store'], 'total': x['true_total']} for x in c['listings']]})
+  except Exception:
+   p_obj = db.get(Product, it.product_id)
+   if p_obj:
+    det_cat = classify_product_category(p_obj.name)
+    eff_p = estimate_item_market_price(p_obj.name, p_obj.category or det_cat)
+    sync_product_store_prices(db, p_obj, eff_p, p_obj.category or det_cat, p_obj.name)
+    try:
+     c = product_summary(db, it.product_id, include_details=False)
+     if c and c.get('listings'):
+      data.append({'name': it.name, 'item_id': it.id, 'listings': [{'store': x['store'], 'total': x['true_total']} for x in c['listings']]})
+    except Exception:
+     pass
  return basket(data, mode=strategy)
