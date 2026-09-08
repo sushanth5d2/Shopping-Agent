@@ -8,7 +8,7 @@ logger = logging.getLogger('uvicorn')
 class Base(DeclarativeBase):
     pass
 
-def make_engine(url: str, timeout: int = 2):
+def make_engine(url: str, timeout: int = 5):
     connect_args = {}
     if 'postgresql' in url:
         connect_args['connect_timeout'] = timeout
@@ -16,22 +16,57 @@ def make_engine(url: str, timeout: int = 2):
 
 def get_candidate_urls():
     env_url = os.getenv('SHOPAGENT_DATABASE_URL') or os.getenv('DATABASE_URL')
+    raw_urls = []
     if env_url:
         u = env_url.replace('postgresql://', 'postgresql+psycopg://', 1)
-        return [u]
+        raw_urls.append(u)
     
-    if settings.database_url:
-        return [settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1)]
+    if settings.database_url and settings.database_url not in raw_urls:
+        raw_urls.append(settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1))
 
     base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
-    return [
-        f"postgresql+psycopg://shopagent:{base_pass}@localhost:5432/shopagent",
-        f"postgresql+psycopg://shopagent:{base_pass}@127.0.0.1:5432/shopagent",
-    ]
+    candidates = list(raw_urls)
+    
+    if raw_urls:
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(raw_urls[0])
+            h = p.hostname or 'db'
+            port = p.port or 5432
+            pwd = p.password or base_pass
+            
+            alt_hosts = [h]
+            if h == 'db': alt_hosts.extend(['shopagent-db', 'postgres'])
+            elif h in ('shopagent-db', 'postgres'): alt_hosts.extend(['db'])
+            elif h in ('localhost', '127.0.0.1'): alt_hosts.extend(['localhost', '127.0.0.1'])
+            
+            for host in alt_hosts:
+                candidates.append(f"postgresql+psycopg://shopagent:{pwd}@{host}:{port}/shopagent")
+                candidates.append(f"postgresql+psycopg://shopagent@{host}:{port}/shopagent")
+                candidates.append(f"postgresql+psycopg://postgres:{pwd}@{host}:{port}/shopagent")
+                candidates.append(f"postgresql+psycopg://postgres@{host}:{port}/shopagent")
+                candidates.append(f"postgresql+psycopg://postgres:{pwd}@{host}:{port}/postgres")
+                candidates.append(f"postgresql+psycopg://postgres@{host}:{port}/postgres")
+                candidates.append(f"postgresql+psycopg://shopagent:{pwd}@{host}:{port}/postgres")
+        except Exception:
+            pass
+    else:
+        for host in ['db', 'shopagent-db', 'localhost', '127.0.0.1']:
+            candidates.append(f"postgresql+psycopg://shopagent:{base_pass}@{host}:5432/shopagent")
+            candidates.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/shopagent")
+            candidates.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/postgres")
+
+    seen = set()
+    deduped = []
+    for x in candidates:
+        if x not in seen:
+            seen.add(x)
+            deduped.append(x)
+    return deduped
 
 # Initialize with the first candidate
 _initial_urls = get_candidate_urls()
-engine = make_engine(_initial_urls[0], timeout=2)
+engine = make_engine(_initial_urls[0], timeout=5)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_engine():
@@ -54,7 +89,7 @@ def wait_for_db(max_retries=10, delay=1.0):
     for attempt in range(1, max_retries + 1):
         for url in candidates:
             try:
-                test_engine = make_engine(url, timeout=2)
+                test_engine = make_engine(url, timeout=5)
                 with test_engine.connect() as conn:
                     engine = test_engine
                     SessionLocal.configure(bind=engine)
@@ -62,12 +97,16 @@ def wait_for_db(max_retries=10, delay=1.0):
                     logger.info(f"Connected to PostgreSQL database: {masked}")
                     print(f"INFO: Connected to PostgreSQL database: {masked}", flush=True)
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                if attempt == 1:
+                    masked = re.sub(r':([^@]+)@', ':****@', url)
+                    logger.debug(f"DB connect attempt to {masked} failed: {e}")
+                    print(f"DEBUG: DB connect attempt to {masked} failed: {type(e).__name__} - {e}", flush=True)
         
-        logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
-        print(f"WARNING: Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...", flush=True)
-        time.sleep(delay)
+        if attempt < max_retries:
+            logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
+            print(f"WARNING: Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...", flush=True)
+            time.sleep(delay)
     
     # Graceful fallback to SQLite so the backend NEVER hangs or fails to start
     logger.warning("PostgreSQL could not be reached after retries. Initializing resilient SQLite database fallback.")
