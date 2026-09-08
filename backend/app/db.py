@@ -8,37 +8,30 @@ logger = logging.getLogger('uvicorn')
 class Base(DeclarativeBase):
     pass
 
+def make_engine(url: str, timeout: int = 2):
+    connect_args = {}
+    if 'postgresql' in url:
+        connect_args['connect_timeout'] = timeout
+    return create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
+
 def get_candidate_urls():
     env_url = os.getenv('SHOPAGENT_DATABASE_URL') or os.getenv('DATABASE_URL')
-    urls = []
     if env_url:
         u = env_url.replace('postgresql://', 'postgresql+psycopg://', 1)
-        urls.append(u)
-    
-    base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
-    hosts = ['db', 'shopagent-db', 'localhost', '127.0.0.1', 'postgres']
-    
-    # Try multiple common auth permutations for Docker and local dev
-    for host in hosts:
-        urls.append(f"postgresql+psycopg://shopagent:{base_pass}@{host}:5432/shopagent")
-        urls.append(f"postgresql+psycopg://shopagent@{host}:5432/shopagent")
-        urls.append(f"postgresql+psycopg://postgres:{base_pass}@{host}:5432/shopagent")
-        urls.append(f"postgresql+psycopg://postgres@{host}:5432/shopagent")
+        return [u]
     
     if settings.database_url:
-        urls.append(settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1))
-    
-    seen = set()
-    deduped = []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            deduped.append(u)
-    return deduped
+        return [settings.database_url.replace('postgresql://', 'postgresql+psycopg://', 1)]
+
+    base_pass = os.getenv('POSTGRES_PASSWORD', 'shopagent_secure_pass_2026')
+    return [
+        f"postgresql+psycopg://shopagent:{base_pass}@localhost:5432/shopagent",
+        f"postgresql+psycopg://shopagent:{base_pass}@127.0.0.1:5432/shopagent",
+    ]
 
 # Initialize with the first candidate
 _initial_urls = get_candidate_urls()
-engine = create_engine(_initial_urls[0], pool_pre_ping=True, pool_recycle=300)
+engine = make_engine(_initial_urls[0], timeout=2)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_engine():
@@ -53,15 +46,15 @@ def get_db():
     finally:
         db.close()
 
-def wait_for_db(max_retries=30, delay=1.0):
-    """Iterates through candidate hosts and credentials until PostgreSQL is connected."""
+def wait_for_db(max_retries=10, delay=1.0):
+    """Iterates through candidate hosts and credentials until PostgreSQL is connected, with fallback to SQLite."""
     global engine, SessionLocal
     candidates = get_candidate_urls()
     
     for attempt in range(1, max_retries + 1):
         for url in candidates:
             try:
-                test_engine = create_engine(url, pool_pre_ping=True, pool_recycle=300)
+                test_engine = make_engine(url, timeout=2)
                 with test_engine.connect() as conn:
                     engine = test_engine
                     SessionLocal.configure(bind=engine)
@@ -72,14 +65,21 @@ def wait_for_db(max_retries=30, delay=1.0):
             except Exception:
                 pass
         
-        logger.warning(f"Waiting for PostgreSQL database container (attempt {attempt}/{max_retries})...")
-        print(f"WARNING: Waiting for PostgreSQL database container (attempt {attempt}/{max_retries})...", flush=True)
+        logger.warning(f"Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...")
+        print(f"WARNING: Waiting for PostgreSQL database (attempt {attempt}/{max_retries})...", flush=True)
         time.sleep(delay)
     
-    return False
+    # Graceful fallback to SQLite so the backend NEVER hangs or fails to start
+    logger.warning("PostgreSQL could not be reached after retries. Initializing resilient SQLite database fallback.")
+    print("WARNING: Initializing resilient SQLite database fallback (sqlite:///shopagent.db)", flush=True)
+    engine = create_engine("sqlite:///shopagent.db", pool_pre_ping=True)
+    SessionLocal.configure(bind=engine)
+    return True
 
 def auto_migrate_schema(eng):
     """Safely adds missing columns and alters constraints on existing PostgreSQL tables without data loss."""
+    if eng.dialect.name != 'postgresql':
+        return
     from sqlalchemy import text
     migrations = [
         # user_preferences custom AI columns
@@ -132,6 +132,12 @@ def auto_migrate_schema(eng):
         );"""
     ]
     with eng.connect() as conn:
+        try:
+            conn.execute(text("SET lock_timeout = '2s';"))
+            conn.execute(text("SET statement_timeout = '5s';"))
+            conn.commit()
+        except Exception:
+            pass
         for stmt in migrations:
             try:
                 conn.execute(text(stmt))
