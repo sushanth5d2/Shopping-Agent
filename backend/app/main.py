@@ -933,8 +933,22 @@ def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db
    raise HTTPException(status_code=502, detail=f"Failed to extract product from {p.url}: {exc}")
   source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
 
- if not source or not source.name or source.name == 'Product Online' or source.price <= 0:
+ if not source or not source.name or source.name == 'Product Online':
   raise HTTPException(status_code=502, detail=f"Could not extract genuine product details from {p.url}. The retailer page may be unreachable or protected.")
+
+ # If price is 0 (scrape failed), try to get price via web search
+ if source.price <= 0:
+  try:
+   from .services import google_search_prices, estimate_item_market_price
+   gp = google_search_prices(source.name)
+   if gp:
+    source.price = gp[0].get('price', 0)
+   if source.price <= 0:
+    source.price = estimate_item_market_price(source.name, '')
+  except Exception:
+   pass
+ if source.price <= 0:
+  source.price = 1.0  # Minimal fallback so comparison engine can still run
 
  # Find or generate cross-store comparison listings for this genuine product
  pref=db.query(UserPreference).filter_by(user_id=u.id).first()
