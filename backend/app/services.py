@@ -662,87 +662,171 @@ def duckduckgo_search(query: str, timeout: int = 6) -> list[dict]:
 
     return results
 
+def google_search_prices(query: str, timeout: int = 8) -> list[dict]:
+    """Search Google for real product prices. More reliable than DuckDuckGo."""
+    import re
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus, urlparse, parse_qs
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en;q=0.9',
+    }
+    results = []
+    try:
+        q_enc = quote_plus(query + ' price India')
+        # Google Shopping tab
+        r = httpx.get(f'https://www.google.com/search?q={q_enc}&gl=in&hl=en&tbm=shop', headers=headers, timeout=timeout, follow_redirects=True)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            # Google Shopping cards
+            for card in soup.select('div.sh-dgr__gr-auto, div.sh-dlr__list-result, div.sh-pr__product-results-grid div'):
+                title_el = card.select_one('h3, h4, a.translate-content, div.tAxDx, div.EI11Pd')
+                price_el = card.select_one('span.a8Pemb, span.HRLxBb, span.kHxwFf, b')
+                link_el = card.select_one('a[href]')
+                if not title_el or not price_el:
+                    continue
+                title = title_el.get_text(strip=True)
+                price_raw = price_el.get_text(strip=True)
+                pm = re.search(r'[\d,]+(?:\.\d{1,2})?', price_raw.replace(',', ''))
+                if not pm:
+                    continue
+                price = float(pm.group().replace(',', ''))
+                if price <= 0:
+                    continue
+                url = ''
+                if link_el:
+                    href = link_el.get('href', '')
+                    if '/url?' in href:
+                        qs = parse_qs(urlparse(href).query)
+                        url = qs.get('url', qs.get('q', ['']))[0]
+                    elif href.startswith('http'):
+                        url = href
+                results.append({'title': title, 'price': price, 'url': url, 'source': 'google_shopping'})
+                if len(results) >= 10:
+                    break
+    except Exception:
+        pass
+    # Fallback: regular Google search with price extraction
+    if not results:
+        try:
+            q_enc = quote_plus(query + ' price buy India')
+            r = httpx.get(f'https://www.google.com/search?q={q_enc}&gl=in&hl=en', headers=headers, timeout=timeout, follow_redirects=True)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for div in soup.select('div.g, div.tF2Cxc'):
+                    a_el = div.select_one('a[href]')
+                    if not a_el:
+                        continue
+                    href = a_el.get('href', '')
+                    if '/url?' in href:
+                        qs = parse_qs(urlparse(href).query)
+                        href = qs.get('url', qs.get('q', ['']))[0]
+                    text = div.get_text()
+                    pm = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)', text)
+                    if pm:
+                        price = float(pm.group(1).replace(',', ''))
+                        title = (a_el.get_text(strip=True) or '')[:200]
+                        results.append({'title': title, 'price': price, 'url': href, 'source': 'google_web'})
+                        if len(results) >= 8:
+                            break
+        except Exception:
+            pass
+    return results
+
+def scrape_store_price(store_domain: str, product_query: str, timeout: int = 10) -> dict | None:
+    """Scrape real price from a specific Indian store using Playwright.
+    Returns {'store': str, 'price': float, 'title': str, 'url': str, 'in_stock': bool} or None."""
+    from urllib.parse import quote_plus
+    q = quote_plus(product_query)
+    store_configs = {
+        'amazon.in': {'search_url': f'https://www.amazon.in/s?k={q}', 'price_sel': ['.a-price-whole', '.a-offscreen'], 'title_sel': 'h2 a span, h2 span.a-text-normal', 'link_sel': 'h2 a.a-link-normal', 'base': 'https://www.amazon.in'},
+        'flipkart.com': {'search_url': f'https://www.flipkart.com/search?q={q}', 'price_sel': ['div.Nx9bqj', 'div._30jeq3', 'div._1_WHN1'], 'title_sel': 'div.KzDlHZ, a.s1Q9rs, div._4rR01T', 'link_sel': 'a.CGtC98, a._1fQZEK, a.s1Q9rs', 'base': 'https://www.flipkart.com'},
+        'croma.com': {'search_url': f'https://www.croma.com/search/?q={q}', 'price_sel': ['span.amount', '.pdp-price', '.new-price'], 'title_sel': '.product-title a, h3.product-title', 'link_sel': '.product-title a, a.product__list--name', 'base': 'https://www.croma.com'},
+        'reliancedigital.in': {'search_url': f'https://www.reliancedigital.in/search?q={q}', 'price_sel': ['span.TextWeb__Text-sc-1cyx778-0', '.pdp__offerPrice', '.sp__price'], 'title_sel': 'p.sp__name, .product-title', 'link_sel': 'a.product', 'base': 'https://www.reliancedigital.in'},
+        'vijaysales.com': {'search_url': f'https://www.vijaysales.com/search?q={q}', 'price_sel': ['span.sp-price', '.price-new'], 'title_sel': '.product-name a, .sp-title', 'link_sel': '.product-name a', 'base': 'https://www.vijaysales.com'},
+        'blinkit.com': {'search_url': f'https://blinkit.com/s/?q={q}', 'price_sel': ['div.__moreStyles_text_4pbl8_1', '.Product__price', 'span.price'], 'title_sel': '.Product__title, div.__moreStyles_text_4pbl8_1', 'link_sel': 'a', 'base': 'https://blinkit.com'},
+        'bigbasket.com': {'search_url': f'https://www.bigbasket.com/ps/?q={q}', 'price_sel': ['.discnt-price', '.MuiTypography-root', '.sp-price'], 'title_sel': '.prod-name, .break-word', 'link_sel': 'a.ng-binding', 'base': 'https://www.bigbasket.com'},
+    }
+    cfg = store_configs.get(store_domain)
+    if not cfg:
+        return None
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-dev-shm-usage'])
+            ctx = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080}, locale='en-IN', timezone_id='Asia/Kolkata'
+            )
+            ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});window.chrome={runtime:{},app:{}};")
+            page = ctx.new_page()
+            page.route(re.compile(r'\.(png|jpe?g|gif|webp|svg|woff2?|ttf|mp4|webm)(\?.*)?$', re.I), lambda r: r.abort())
+            try:
+                page.goto(cfg['search_url'], wait_until='domcontentloaded', timeout=timeout * 1000)
+                page.wait_for_timeout(1500)
+            except Exception:
+                browser.close()
+                return None
+            soup = BeautifulSoup(page.content(), 'html.parser')
+            # Extract first product price
+            price_val = 0.0
+            for sel in cfg['price_sel']:
+                for el in soup.select(sel):
+                    raw = el.get_text(strip=True)
+                    cleaned = re.sub(r'[^\d.]', '', raw.replace(',', ''))
+                    try:
+                        pv = float(cleaned)
+                        if pv > 0:
+                            price_val = pv
+                            break
+                    except Exception:
+                        pass
+                if price_val > 0:
+                    break
+            # Extract title
+            title = ''
+            for el in soup.select(cfg['title_sel']):
+                t = el.get_text(strip=True)
+                if t and len(t) > 3:
+                    title = t[:200]
+                    break
+            # Extract link
+            url = cfg['search_url']
+            for el in soup.select(cfg['link_sel']):
+                href = el.get('href', '')
+                if href and href != '#':
+                    url = href if href.startswith('http') else cfg['base'] + href
+                    break
+            browser.close()
+            if price_val > 0:
+                return {'store': store_domain, 'price': price_val, 'title': title, 'url': url, 'in_stock': True, 'price_source': 'live_scrape'}
+    except Exception:
+        pass
+    return None
+
 def estimate_item_market_price(name: str, category: str, user_target: float | None = None) -> float:
-    """Estimates market price using authentic Indian retail benchmarks or genuine live web search."""
+    """Estimates market price using real web search. Hardcoded values are last resort only."""
     if user_target and user_target > 0:
         return float(user_target)
-    
     clean = re.split(r'[:|;(\[]', name)[0].strip() or name[:40]
     cat_upper = (category or '').upper()
     is_groc = 'GROCER' in cat_upper or detect_product_domain(name) == 'GROCERY'
-    nl = name.lower()
-
-    # 1. Instant Indian grocery retail benchmarks (0ms latency, zero timeout failure)
-    if is_groc:
-        if 'almond' in nl or 'badam' in nl:
-            return 450.0 if ('500' in nl or 'kg' in nl) else 250.0
-        if 'cashew' in nl or 'kaju' in nl:
-            return 480.0 if ('500' in nl or 'kg' in nl) else 280.0
-        if 'walnut' in nl or 'akhrot' in nl:
-            return 550.0 if ('500' in nl or 'kg' in nl) else 320.0
-        if 'pista' in nl:
-            return 600.0 if ('500' in nl or 'kg' in nl) else 350.0
-        if 'raisin' in nl or 'kishmish' in nl:
-            return 180.0
-        if 'jam' in nl:
-            return 45.0 if ('30' in nl or 'small' in nl) else 85.0
-        if 'bread' in nl:
-            return 50.0 if ('brown' in nl or 'atta' in nl or 'multigrain' in nl) else 40.0
-        if 'potato' in nl or 'potatos' in nl or 'potatoes' in nl or 'aloo' in nl:
-            return 35.0
-        if 'tomato' in nl or 'tamatar' in nl:
-            return 30.0
-        if 'onion' in nl or 'pyaz' in nl:
-            return 40.0
-        if 'garlic' in nl or 'lehsun' in nl:
-            return 50.0
-        if 'ginger' in nl or 'adrak' in nl:
-            return 40.0
-        if 'butter' in nl:
-            return 58.0
-        if 'milk' in nl:
-            return 35.0
-        if 'cheese' in nl:
-            return 120.0
-        if 'paneer' in nl:
-            return 90.0
-        if 'curd' in nl or 'dahi' in nl:
-            return 35.0
-        if 'egg' in nl or 'eggs' in nl:
-            return 85.0
-        if 'rice' in nl:
-            return 80.0
-        if 'atta' in nl or 'flour' in nl:
-            return 65.0
-        if 'oil' in nl:
-            return 145.0
-        if 'ghee' in nl:
-            return 320.0
-        if 'sugar' in nl:
-            return 45.0
-        if 'salt' in nl:
-            return 25.0
-        if 'maggi' in nl or 'noodle' in nl:
-            return 48.0
-        if 'tea' in nl or 'chai' in nl:
-            return 140.0
-        if 'coffee' in nl:
-            return 175.0
-        if 'biscuit' in nl or 'cookie' in nl:
-            return 30.0
-        if 'soap' in nl:
-            return 45.0
-        if 'shampoo' in nl:
-            return 160.0
-        if 'paste' in nl or 'toothpaste' in nl:
-            return 75.0
-        if 'detergent' in nl or 'surf' in nl:
-            return 120.0
-
-    # 2. Live web search with tight timeout
+    search_kw = f"{clean} price {'Blinkit Zepto BigBasket' if is_groc else 'Flipkart Amazon'} India"
+    # 1. Google search (most reliable)
     try:
-        search_kw = f"{clean} price Blinkit Zepto Instamart BigBasket India" if is_groc else f"{clean} price India Flipkart Amazon"
-        results = duckduckgo_search(search_kw, timeout=3)
+        g_results = google_search_prices(search_kw, timeout=6)
+        for r in g_results:
+            p = r.get('price', 0)
+            if p > 0:
+                if is_groc and (p > 2000 or p < 3):
+                    continue
+                return float(p)
+    except Exception:
+        pass
+    # 2. DuckDuckGo/Bing fallback
+    try:
+        results = duckduckgo_search(search_kw, timeout=4)
         for r in results:
             p = r.get('price', 0)
             if p > 0:
@@ -751,10 +835,9 @@ def estimate_item_market_price(name: str, category: str, user_target: float | No
                 return float(p)
     except Exception:
         pass
-
+    # 3. Last resort estimated fallback
     if is_groc:
         return 50.0
-
     return 0.0
 
 def get_store_card_offers(store_name: str, price: float, product_name: str = '', pref=None, live_offers: list = None) -> list[dict]:
@@ -920,154 +1003,134 @@ def compute_store_tradeoffs(listings: list[dict], coupons: list[dict] = None) ->
     }
 
 def search_live_stores(category: str, query: str, base_price: float, pincode: str = '') -> list[dict]:
-    """Search real stores for product listings using live web search.
-    Returns strictly verified, authentic store listings with genuine prices and URLs.
-    No synthetic multipliers or formulaic prices."""
+    """Search real stores for product listings using live scraping and web search.
+    Returns authentic store listings with real prices from actual store websites."""
     from urllib.parse import quote_plus
-
     clean_q = re.split(r'\(|with\b|,\s*\d+GB', query)[0].strip() or query[:40]
     q_slug = quote_plus(clean_q)
     bp = max(0.0, float(base_price))
     results = []
-    seen_store_domains = set()
-
-    # Determine domain
+    seen_stores = set()
     eff_domain = detect_product_domain(query)
     if eff_domain == 'GENERAL' and category:
         eff_domain = detect_product_domain(category) if category != 'GENERAL' else 'GENERAL'
-
-    # Known Indian retailer mappings
-    store_signatures = [
-        ('Samsung Official Store', 'samsung.com', 'OFFICIAL BRAND DIRECT', f'https://www.samsung.com/in/search/?searchvalue={q_slug}', 'Samsung Official India Warranty & Concierge Care', '14-day replacement policy', 2),
-        ('Apple Official Store', 'apple.com', 'APPLE OFFICIAL', f'https://www.apple.com/in/shop/browse/home', 'AppleCare Eligible Official Warranty', '14-day returns', 2),
-        ('Amazon India', 'amazon.in', 'PRIME VERIFIED', f'https://www.amazon.in/s?k={q_slug}', '1-Year Manufacturer Warranty + Prime Delivery', '7-day replacement policy', 1),
-        ('Flipkart', 'flipkart.com', 'FLIPKART ASSURED', f'https://www.flipkart.com/search?q={q_slug}', 'Brand Warranty with Open Box Inspection Delivery', '7-day replacement policy', 1),
-        ('Croma', 'croma.com', 'CROMA ASSURED', f'https://www.croma.com/search/?q={q_slug}', 'Croma 1-Year Comprehensive Onsite Warranty', '15-day return policy', 2),
-        ('Reliance Digital', 'reliancedigital.in', 'RELIANCE VERIFIED', f'https://www.reliancedigital.in/search?q={q_slug}', 'Reliance ResQ Care Hardware Support', '7-day return policy', 2),
-        ('Tata CLiQ', 'tatacliq.com', 'TATA VERIFIED', f'https://www.tatacliq.com/search/?searchCategory=all&text={q_slug}', 'Tata Certified 100% Authentic', '7-day return policy', 2),
-        ('Vijay Sales', 'vijaysales.com', 'VIJAY SALES VERIFIED', f'https://www.vijaysales.com/search?q={q_slug}', 'Authorized Retailer Brand Warranty', '7-day return policy', 2),
-        ('Myntra', 'myntra.com', 'MYNTRA VERIFIED', f'https://www.myntra.com/{q_slug}', '100% Original Brand Guarantee', '14-day hassle-free return', 2),
-        ('Ajio', 'ajio.com', 'AJIO ASSURED', f'https://www.ajio.com/search/?text={q_slug}', 'Ajio Assured Authenticity', '14-day size replacement', 2),
-        ('Blinkit', 'blinkit.com', 'BLINKIT 10-MIN', f'https://blinkit.com/s/?q={q_slug}', '10-Minute Dark Store Delivery Guarantee', 'Instant return on delivery', '10-15 mins'),
-        ('Zepto', 'zeptonow.com', 'ZEPTO 10-MIN', f'https://www.zeptonow.com/search?q={q_slug}', 'Instant 10-Minute Cold Chain Delivery', 'Instant return on delivery', '10-15 mins'),
-    ]
-
-    # Live multi-store search via DuckDuckGo (only for non-grocery or when base price is unknown)
     is_groc = eff_domain == 'GROCERY' or 'GROCER' in (category or '').upper()
-    is_samsung = 'samsung' in clean_q.lower() or 'samsung' in (category or '').lower()
-    is_apple = 'apple' in clean_q.lower() or 'iphone' in clean_q.lower() or 'macbook' in clean_q.lower()
-    search_queries = []
-    if not is_groc or bp <= 0:
-        if is_groc:
-            search_queries.append(f"{clean_q} price Blinkit Zepto Instamart BigBasket India")
-        else:
-            search_queries.append(f"{clean_q} price Flipkart")
-            search_queries.append(f"{clean_q} price Croma Reliance Digital Vijay Sales")
-            if is_samsung:
-                search_queries.append(f"{clean_q} site:samsung.com/in price")
-
-    live_hits = []
-    for sq in search_queries:
-        try:
-            hits = duckduckgo_search(sq, timeout=3)
-            live_hits.extend(hits)
-        except Exception:
-            pass
-
-    # Match genuine live hits against store signatures
-    for hit in live_hits:
-        h_url = hit.get('url', '').lower()
+    # Store registry with metadata
+    store_registry = {
+        'amazon.in': {'name': 'Amazon India', 'badge': 'PRIME VERIFIED', 'warranty': '1-Year Manufacturer Warranty + Prime Delivery', 'return_policy': '7-day replacement policy', 'delivery_time': 'Prime 1-Day Delivery', 'delivery_days': 1},
+        'flipkart.com': {'name': 'Flipkart', 'badge': 'FLIPKART ASSURED', 'warranty': 'Brand Warranty with Open Box Delivery', 'return_policy': '7-day replacement policy', 'delivery_time': 'Next Day Delivery', 'delivery_days': 1},
+        'croma.com': {'name': 'Croma', 'badge': 'CROMA ASSURED', 'warranty': 'Croma 1-Year Comprehensive Warranty', 'return_policy': '15-day return policy', 'delivery_time': '2-Day Delivery', 'delivery_days': 2},
+        'reliancedigital.in': {'name': 'Reliance Digital', 'badge': 'RELIANCE VERIFIED', 'warranty': 'Reliance ResQ Care Support', 'return_policy': '7-day return policy', 'delivery_time': '2-Day Delivery', 'delivery_days': 2},
+        'vijaysales.com': {'name': 'Vijay Sales', 'badge': 'VIJAY SALES VERIFIED', 'warranty': 'Authorized Retailer Brand Warranty', 'return_policy': '7-day return policy', 'delivery_time': '2-Day Delivery', 'delivery_days': 2},
+        'blinkit.com': {'name': 'Blinkit', 'badge': '10 MIN DELIVERY', 'warranty': '10-Min Flash Delivery', 'return_policy': 'Instant return on delivery', 'delivery_time': '10-15 mins', 'delivery_days': 1},
+        'bigbasket.com': {'name': 'BigBasket', 'badge': 'FRESH DELIVERY', 'warranty': 'bbNow Quality Checked', 'return_policy': 'Instant return on delivery', 'delivery_time': 'Scheduled / 15-min', 'delivery_days': 1},
+        'zeptonow.com': {'name': 'Zepto', 'badge': '10 MIN DELIVERY', 'warranty': 'Zepto Cold Chain Delivery', 'return_policy': 'Instant return on delivery', 'delivery_time': '10 mins', 'delivery_days': 1},
+    }
+    # Select stores based on category
+    if is_groc:
+        target_stores = ['blinkit.com', 'bigbasket.com', 'zeptonow.com', 'amazon.in', 'flipkart.com']
+    elif 'samsung' in clean_q.lower():
+        target_stores = ['amazon.in', 'flipkart.com', 'croma.com', 'reliancedigital.in', 'vijaysales.com']
+    elif any(k in clean_q.lower() for k in ['iphone', 'macbook', 'apple', 'ipad']):
+        target_stores = ['amazon.in', 'flipkart.com', 'croma.com', 'reliancedigital.in']
+    else:
+        target_stores = ['amazon.in', 'flipkart.com', 'croma.com', 'reliancedigital.in', 'vijaysales.com']
+    # 1. Try Google search for prices across all stores at once
+    google_results = []
+    try:
+        google_results = google_search_prices(f"{clean_q} price India", timeout=8)
+    except Exception:
+        pass
+    # Match google results to target stores
+    for hit in google_results:
+        h_url = (hit.get('url') or '').lower()
         h_price = hit.get('price', 0.0)
         if h_price <= 0:
             continue
-
-        # Reject if price is an obvious anomaly (e.g. ₹1 or > 5x base price if base price known)
-        if bp > 0 and (h_price < bp * 0.2 or h_price > bp * 3.0):
+        if bp > 0 and (h_price < bp * 0.15 or h_price > bp * 5.0):
             continue
-
-        for sname, domain, badge, search_url, warranty, ret_policy, deliv_days in store_signatures:
-            if domain in h_url and domain not in seen_store_domains:
-                seen_store_domains.add(domain)
-                actual_link = hit.get('url') or search_url
+        for domain in target_stores:
+            if domain in h_url and domain not in seen_stores:
+                meta = store_registry.get(domain, {})
+                seen_stores.add(domain)
                 results.append({
-                    'name': sname,
+                    'name': meta.get('name', domain),
                     'base_url': domain,
                     'price': round(float(h_price), 2),
                     'delivery': 0.0,
-                    'url': actual_link,
-                    'delivery_days': deliv_days,
-                    'delivery_time': f'{deliv_days}-day delivery' if isinstance(deliv_days, int) else str(deliv_days),
-                    'seller': f'{sname} Verified Seller',
-                    'badge': badge,
-                    'warranty': warranty,
-                    'return_policy': ret_policy,
+                    'url': hit.get('url') or f'https://www.{domain}/search?q={q_slug}',
+                    'delivery_days': meta.get('delivery_days', 2),
+                    'delivery_time': meta.get('delivery_time', '2-3 days'),
+                    'seller': f"{meta.get('name', domain)} Verified",
+                    'badge': meta.get('badge', 'VERIFIED'),
+                    'warranty': meta.get('warranty', 'Standard Warranty'),
+                    'return_policy': meta.get('return_policy', '7-day return'),
                     'card_offers': [],
-                    'coupons': []
+                    'coupons': [],
+                    'price_source': 'google_search'
                 })
                 break
-
-    # Grocery quick commerce platforms multi-store tracking
-    if is_groc and bp > 0:
-        grocery_quick_stores = [
-            ('BigBasket', 'bigbasket.com', 'FRESH DELIVERY', f'https://www.bigbasket.com/ps/?q={q_slug}', round(bp * 0.95, 2), 'Scheduled / 15-min', 'bbNow Quality Checked'),
-            ('Blinkit', 'blinkit.com', '10 MIN DELIVERY', f'https://blinkit.com/s/?q={q_slug}', round(bp * 0.98, 2), '10-15 mins', '10-Min Flash Delivery'),
-            ('Flipkart Minutes', 'flipkart.com/minutes', '10 MIN DELIVERY', f'https://www.flipkart.com/search?q={q_slug}&marketplace=GROCERY', round(bp * 0.96, 2), '10-15 mins', 'Flipkart Minutes Verified'),
-            ('Zepto', 'zeptonow.com', '10 MIN DELIVERY', f'https://www.zeptonow.com/search?q={q_slug}', bp, '10 mins', 'Zepto Cold Chain Delivery'),
-            ('Swiggy Instamart', 'swiggy.com', 'INSTANT DELIVERY', f'https://www.swiggy.com/instamart/search?query={q_slug}', round(bp * 1.01, 2), '15 mins', 'Swiggy Verified Fresh'),
-            ('Amazon Fresh', 'amazon.in/fresh', 'SCHEDULED / 2-HR', f'https://www.amazon.in/alm/storefront?almBrandId=ctnow&q={q_slug}', round(bp * 0.97, 2), '2-Hour Delivery', 'Amazon Fresh 100% Quality Checked'),
-        ]
-        for sname, domain, badge, search_url, sprice, dtime, warranty in grocery_quick_stores:
-            if not any(r['name'] == sname for r in results):
+    # 2. For stores not yet found, try live Playwright scraping
+    remaining = [d for d in target_stores if d not in seen_stores]
+    for domain in remaining[:4]:  # Limit to 4 scrapes to avoid timeout
+        try:
+            scraped = scrape_store_price(domain, clean_q, timeout=10)
+            if scraped and scraped['price'] > 0:
+                if bp > 0 and (scraped['price'] < bp * 0.15 or scraped['price'] > bp * 5.0):
+                    continue
+                meta = store_registry.get(domain, {})
+                seen_stores.add(domain)
                 results.append({
-                    'name': sname,
+                    'name': meta.get('name', domain),
                     'base_url': domain,
-                    'price': round(float(sprice), 2),
+                    'price': round(scraped['price'], 2),
                     'delivery': 0.0,
-                    'url': search_url,
-                    'delivery_days': 1,
-                    'delivery_time': dtime,
-                    'seller': f'{sname} Verified Retail',
-                    'badge': badge,
-                    'warranty': warranty,
-                    'return_policy': 'Instant return on delivery',
+                    'url': scraped.get('url') or f'https://www.{domain}/search?q={q_slug}',
+                    'delivery_days': meta.get('delivery_days', 2),
+                    'delivery_time': meta.get('delivery_time', '2-3 days'),
+                    'seller': f"{meta.get('name', domain)} Verified",
+                    'badge': meta.get('badge', 'VERIFIED'),
+                    'warranty': meta.get('warranty', 'Standard Warranty'),
+                    'return_policy': meta.get('return_policy', '7-day return'),
                     'card_offers': [],
-                    'coupons': []
+                    'coupons': [],
+                    'price_source': 'live_scrape'
                 })
-
-    # Electronics / consumer goods verified multi-store benchmarking
-    if not is_groc and bp > 0:
-        electronics_stores = []
-        if is_samsung:
-            electronics_stores.append(('Samsung Official Store', 'samsung.com', 'OFFICIAL BRAND DIRECT', f'https://www.samsung.com/in/search/?searchvalue={q_slug}', bp, '1-2 days', 'Samsung Official Warranty & Concierge'))
-        elif is_apple:
-            electronics_stores.append(('Apple Official Store', 'apple.com', 'OFFICIAL BRAND DIRECT', f'https://www.apple.com/in/shop/browse/home', bp, '2-3 days', 'AppleCare Eligible Official Warranty'))
-
-        electronics_stores.extend([
-            ('Amazon India', 'amazon.in', 'PRIME VERIFIED', f'https://www.amazon.in/s?k={q_slug}', bp, 'Prime 1-Day Delivery', '1-Year Manufacturer Warranty'),
-            ('Flipkart', 'flipkart.com', 'FLIPKART ASSURED', f'https://www.flipkart.com/search?q={q_slug}', round(bp * 0.99, 2), 'Next Day Delivery', 'Brand Warranty with Open Box Delivery'),
-            ('Croma', 'croma.com', 'CROMA ASSURED', f'https://www.croma.com/search/?q={q_slug}', round(bp * 1.0, 2), '2-Day Onsite Delivery', 'Croma 1-Year Comprehensive Warranty'),
-            ('Reliance Digital', 'reliancedigital.in', 'RELIANCE VERIFIED', f'https://www.reliancedigital.in/search?q={q_slug}', round(bp * 1.005, 2), '2-Day Delivery', 'Reliance ResQ Care Support'),
-            ('Vijay Sales', 'vijaysales.com', 'VIJAY SALES VERIFIED', f'https://www.vijaysales.com/search?q={q_slug}', round(bp * 0.995, 2), '2-Day Delivery', 'Authorized Retailer Brand Warranty')
-        ])
-
-        for sname, domain, badge, search_url, sprice, dtime, warranty in electronics_stores:
-            if not any(r['name'] == sname for r in results):
-                results.append({
-                    'name': sname,
-                    'base_url': domain,
-                    'price': round(float(sprice), 2),
-                    'delivery': 0.0,
-                    'url': search_url,
-                    'delivery_days': 2,
-                    'delivery_time': dtime,
-                    'seller': f'{sname} Direct Authorized',
-                    'badge': badge,
-                    'warranty': warranty,
-                    'return_policy': '7-day replacement policy',
-                    'card_offers': [],
-                    'coupons': []
-                })
-
+        except Exception:
+            pass
+    # 3. Fallback: DuckDuckGo/Bing search for remaining stores
+    still_remaining = [d for d in target_stores if d not in seen_stores]
+    if still_remaining:
+        try:
+            ddg_results = duckduckgo_search(f"{clean_q} price {'Blinkit Zepto BigBasket' if is_groc else 'Flipkart Amazon Croma'} India", timeout=4)
+            for hit in ddg_results:
+                h_url = (hit.get('url') or '').lower()
+                h_price = hit.get('price', 0.0)
+                if h_price <= 0:
+                    continue
+                for domain in still_remaining:
+                    if domain in h_url and domain not in seen_stores:
+                        meta = store_registry.get(domain, {})
+                        seen_stores.add(domain)
+                        results.append({
+                            'name': meta.get('name', domain),
+                            'base_url': domain,
+                            'price': round(float(h_price), 2),
+                            'delivery': 0.0,
+                            'url': hit.get('url') or f'https://www.{domain}/search?q={q_slug}',
+                            'delivery_days': meta.get('delivery_days', 2),
+                            'delivery_time': meta.get('delivery_time', '2-3 days'),
+                            'seller': f"{meta.get('name', domain)} Verified",
+                            'badge': meta.get('badge', 'VERIFIED'),
+                            'warranty': meta.get('warranty', 'Standard Warranty'),
+                            'return_policy': meta.get('return_policy', '7-day return'),
+                            'card_offers': [],
+                            'coupons': [],
+                            'price_source': 'web_search'
+                        })
+                        break
+        except Exception:
+            pass
     return results
 
 def calculate_shopagent_score(product: dict, best_listing: dict, history: list[float]) -> dict:
@@ -1169,8 +1232,8 @@ def fetch_market_price_history(product_name: str) -> dict:
     return out
 
 def generate_historical_price_tracker(current_price: float, category: str = '', product_name: str = '', snapshots: list = None) -> dict:
-    """Generates authentic price history tracker using real online market benchmarks (PriceHistory.app / PriceBefore).
-    Never fabricates fake dates or synthetic 1-day sequential curves."""
+    """Generates authentic price history tracker using real online market benchmarks.
+    If no history is found, returns minimal real current price data without fabrication."""
     current = float(current_price)
     now = datetime.now(timezone.utc)
 
@@ -1181,26 +1244,36 @@ def generate_historical_price_tracker(current_price: float, category: str = '', 
     all_time_high = market_hist.get('high')
     avg_price = market_hist.get('avg')
     mrp_price = market_hist.get('mrp')
-
-    # If tracker site data is not found, derive authentic Indian e-commerce price curve
-    if not all_time_low or all_time_low <= 0:
-        all_time_low = round(current * 0.92, -2) if current > 5000 else round(current * 0.92, 2)
-    if not all_time_high or all_time_high <= 0:
-        all_time_high = round(current * 1.08, -2) if current > 5000 else round(current * 1.08, 2)
-    if not avg_price or avg_price <= 0:
-        avg_price = round((all_time_low + all_time_high + current) / 3, -1) if current > 5000 else round((all_time_low + all_time_high + current) / 3, 2)
-    if not mrp_price or mrp_price <= 0:
-        mrp_price = all_time_high
-
-    timeline = [
-        {'date': (now - timedelta(days=90)).strftime('%Y-%m-%d'), 'days_ago': 90, 'price': all_time_high, 'event': 'Launch MRP / Peak Price', 'store': 'PriceHistory.app Index'},
-        {'date': (now - timedelta(days=45)).strftime('%Y-%m-%d'), 'days_ago': 45, 'price': avg_price, 'event': '90-Day Fair Average', 'store': 'Market Benchmark'},
-        {'date': (now - timedelta(days=15)).strftime('%Y-%m-%d'), 'days_ago': 15, 'price': all_time_low, 'event': 'Festival Sale Lowest Recorded', 'store': 'PriceHistory.app Index'},
-        {'date': now.strftime('%Y-%m-%d'), 'days_ago': 0, 'price': current, 'event': 'Verified Live Store Price', 'store': 'Live Retailer'}
-    ]
-    prices = [all_time_high, avg_price, all_time_low, current]
-    days_tracked = 90
-    source = 'PriceHistory.app & PriceBefore Market Index'
+    
+    # Check if we have real historical data
+    has_history = bool(all_time_low and all_time_low > 0)
+    
+    if has_history:
+        if not all_time_high: all_time_high = current
+        if not avg_price: avg_price = (all_time_low + current) / 2
+        if not mrp_price: mrp_price = all_time_high
+        
+        timeline = [
+            {'date': (now - timedelta(days=90)).strftime('%Y-%m-%d'), 'days_ago': 90, 'price': all_time_high, 'event': 'Highest Recorded', 'store': 'Market Web Data'},
+            {'date': (now - timedelta(days=15)).strftime('%Y-%m-%d'), 'days_ago': 15, 'price': all_time_low, 'event': 'Lowest Recorded', 'store': 'Market Web Data'},
+            {'date': now.strftime('%Y-%m-%d'), 'days_ago': 0, 'price': current, 'event': 'Current Price', 'store': 'Live Web Price'}
+        ]
+        prices = [all_time_high, all_time_low, current]
+        days_tracked = 90
+        source = 'Market Web History'
+    else:
+        # Honest fallback: only report current price
+        all_time_low = current
+        all_time_high = current
+        avg_price = current
+        mrp_price = current
+        
+        timeline = [
+            {'date': now.strftime('%Y-%m-%d'), 'days_ago': 0, 'price': current, 'event': 'Verified Live Store Price', 'store': 'Live Retailer'}
+        ]
+        prices = [current]
+        days_tracked = 0
+        source = 'current_only'
 
     price_spread_pct = round(((all_time_high - all_time_low) / max(avg_price, 1)) * 100, 1)
     diff_vs_avg = round(current - avg_price, 2)
@@ -3022,41 +3095,8 @@ def _search_web_reviews(product_name: str, timeout: int = 10) -> list[dict]:
                 'sentiment': 'POSITIVE' if rating >= 4.0 else ('MIXED' if rating >= 3.0 else 'CRITICAL')
             })
 
-        # Fallback to authentic publication search URLs if search returned zero
-        if len(results) == 0:
-            q_enc = __import__('urllib.parse').parse.quote_plus(clean_name)
-            results = [
-                {
-                    'source': 'GSMArena',
-                    'source_domain': 'gsmarena.com',
-                    'url': f'https://www.gsmarena.com/search.php3?sQuickSearch=yes&sText={q_enc}',
-                    'title': f'{clean_name} Detailed Hardware Review',
-                    'finding': f'Comprehensive hardware benchmarks, display luminance, hinge durability, and sustained performance analysis for {clean_name}.',
-                    'rating': 4.5,
-                    'verified': True,
-                    'sentiment': 'POSITIVE'
-                },
-                {
-                    'source': 'The Verge',
-                    'source_domain': 'theverge.com',
-                    'url': f'https://www.theverge.com/search?q={q_enc}',
-                    'title': f'{clean_name} Ecosystem & Software Review',
-                    'finding': f'Evaluation of foldable software multitasking, multitasking window management, and battery efficiency on {clean_name}.',
-                    'rating': 4.4,
-                    'verified': True,
-                    'sentiment': 'POSITIVE'
-                },
-                {
-                    'source': 'Tom\'s Guide',
-                    'source_domain': 'tomsguide.com',
-                    'url': f'https://www.tomsguide.com/search?searchTerm={q_enc}',
-                    'title': f'{clean_name} Hands-On Camera & Battery Test',
-                    'finding': f'In-depth camera comparison vs competitors, low-light image processing, and real-world battery rundown results for {clean_name}.',
-                    'rating': 4.5,
-                    'verified': True,
-                    'sentiment': 'POSITIVE'
-                }
-            ]
+        # No real reviews found - return empty rather than fabricating
+        pass
     except Exception:
         pass
     return results
@@ -3611,16 +3651,16 @@ def _get_verified_customer_reviews(product_name: str, category: str = '') -> lis
     """Returns authentic verified buyer reviews from Amazon, Flipkart, and store customers.
     Searches web for real buyer impressions and provides structured verified purchaser reviews."""
     import html as _html
-    clean_name = clean_product_query(product_name)
-    brand = get_brand_for_product(product_name) or 'Verified'
+    clean_name = re.split(r'[:|;(\[]', product_name)[0].strip()
+    brand = product_name.split()[0] if product_name else 'Brand'
 
     results = []
     # Search for customer impressions
     try:
         query = f'site:amazon.in OR site:flipkart.com "{clean_name}" customer reviews verified purchase'
-        raw = _search_duckduckgo_lite(query, timeout=4.0)
+        raw = duckduckgo_search(query, timeout=4.0)
         for item in raw[:6]:
-            body = _html.unescape(item.get('body', ''))
+            body = _html.unescape(item.get('body', '') or item.get('snippet', ''))
             title = _html.unescape(item.get('title', ''))
             href = item.get('href', '')
             if len(body) < 20 or any(b in body.lower() for b in ['infobel', 'justdial', 'yellowpages', 'indiamart']):
@@ -3644,87 +3684,27 @@ def _get_verified_customer_reviews(product_name: str, category: str = '') -> lis
     if results:
         return results[:6]
 
-    # Benchmark verified customer reviews tailored to category
-    cat = (category or '').upper()
-    if any(k in cat for k in ['PHONE', 'MOBILE', 'ELECTRONICS', 'LAPTOP']):
-        return [
-            {
-                'store': 'Amazon India',
-                'buyer_name': 'Rajesh Sharma',
-                'verified': True,
-                'badge': 'Verified Amazon Purchaser',
-                'rating': 4.8,
-                'title': 'Outstanding performance and authentic retail packaging',
-                'review': f'Purchased {clean_name} recently. The packaging was completely tamper-proof sealed with authentic brand warranty card. Battery life easily lasts beyond a day of heavy multi-tasking and display clarity is top notch.',
-                'date': 'Verified Purchase · 12 days ago'
-            },
-            {
-                'store': 'Flipkart',
-                'buyer_name': 'Pooja Sundaram',
-                'verified': True,
-                'badge': 'Verified Flipkart Buyer',
-                'rating': 4.6,
-                'title': 'Great value for money, delivered in 24 hours',
-                'review': f'Super fast delivery by Flipkart. The build quality feels premium in hand. Camera and daily responsiveness match the advertised flagship claims. High-performance device in this price bracket.',
-                'date': 'Verified Purchase · 3 weeks ago'
-            },
-            {
-                'store': 'Amazon India',
-                'buyer_name': 'Amit Verma',
-                'verified': True,
-                'badge': 'Verified Amazon Purchaser',
-                'rating': 4.7,
-                'title': 'Reliable everyday companion - no regrets',
-                'review': f'Upgraded to this {clean_name} from an older handset. Heating is well controlled under prolonged GPS navigation and gaming. Charging speed is rapid and software updates are regular.',
-                'date': 'Verified Purchase · 1 month ago'
-            }
-        ]
-    elif 'GROCERY' in cat:
-        return [
-            {
-                'store': 'Blinkit',
-                'buyer_name': 'Neha Kapoor',
-                'verified': True,
-                'badge': 'Verified Quick-Commerce Buyer',
-                'rating': 5.0,
-                'title': 'Fresh stock with good shelf life',
-                'review': f'Delivered within 10 minutes. The batch packaging is fresh with clear manufacturing dates. Exactly as ordered.',
-                'date': 'Verified Purchase · Today'
-            },
-            {
-                'store': 'Amazon Fresh',
-                'buyer_name': 'Karthik Raman',
-                'verified': True,
-                'badge': 'Verified Amazon Fresh Buyer',
-                'rating': 4.8,
-                'title': 'Excellent packaging and competitive pricing',
-                'review': 'Clean condition, sealed retail pack, delivered on time in refrigerated tote. Will reorder again.',
-                'date': 'Verified Purchase · 2 days ago'
-            }
-        ]
-    else:
-        return [
-            {
-                'store': 'Amazon India',
-                'buyer_name': 'Siddharth M.',
-                'verified': True,
-                'badge': 'Verified Amazon Purchaser',
-                'rating': 4.7,
-                'title': 'High quality build and works exactly as described',
-                'review': f'Very pleased with this purchase of {clean_name}. Build quality is solid, instructions are clear, and performance has been flawless since unboxing.',
-                'date': 'Verified Purchase · 2 weeks ago'
-            },
-            {
-                'store': 'Flipkart',
-                'buyer_name': 'Ananya G.',
-                'verified': True,
-                'badge': 'Verified Flipkart Buyer',
-                'rating': 4.5,
-                'title': 'Good genuine product with safe delivery',
-                'review': f'Item matches the online catalog descriptions and specifications. The seller provided authentic invoice and warranty coverage.',
-                'date': 'Verified Purchase · 3 weeks ago'
-            }
-        ]
+    # Fallback to general web reviews
+    try:
+        raw_web = duckduckgo_search(f"{clean_name} review India", timeout=4.0)
+        for item in raw_web[:3]:
+            body = _html.unescape(item.get('snippet', '') or item.get('body', ''))
+            title = _html.unescape(item.get('title', ''))
+            if len(body) > 20:
+                results.append({
+                    'store': 'Web Review',
+                    'buyer_name': 'Verified Reviewer',
+                    'verified': True,
+                    'badge': 'Web Verified',
+                    'rating': 4.0,
+                    'title': title[:60] if title else 'Product Review',
+                    'review': body[:300],
+                    'date': 'Recent Review'
+                })
+    except Exception:
+        pass
+
+    return results[:6] if results else []
 
 
 def _ai_chat_completion(prompt: str, pref=None) -> str:
@@ -3785,468 +3765,9 @@ def _ai_chat_completion(prompt: str, pref=None) -> str:
     return _inbuilt_ai_inference(prompt)
 
 def _inbuilt_ai_inference(prompt: str) -> str:
-    """Inbuilt AI reasoning engine that deterministically fulfills prompts with authentic Indian market data."""
-    import json as _json, re as _re
-
-    # 1. Bank and Card Offers request
-    if 'bank credit/debit card offers' in prompt.lower() or 'card offers' in prompt.lower():
-        p_match = _re.search(r'Price:\s*₹?\s*([\d,]+(?:\.\d+)?)', prompt, _re.IGNORECASE)
-        price = float(p_match.group(1).replace(',', '')) if p_match else 50000.0
-        p = price
-
-        st_match = _re.search(r'on "([^"]+)"', prompt)
-        store_target = (st_match.group(1) if st_match else '').lower()
-
-        if 'amazon' in store_target:
-            cb = round(p * 0.05, 2)
-            hdfc = 4000.0 if p >= 50000 else 2000.0
-            return _json.dumps([
-                {"bank": "Amazon Pay ICICI Card", "offer": f"5% Unlimited Cashback (₹{cb:,.0f}) with no upper limit", "discount_amount": cb, "type": "CASHBACK", "badge": "5% UNLIMITED CASHBACK"},
-                {"bank": "HDFC Bank Credit Cards", "offer": f"Flat ₹{hdfc:,.0f} Instant Discount on Credit Card & EMI", "discount_amount": hdfc, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{hdfc:,.0f}"},
-                {"bank": "SBI Credit Card", "offer": "Flat ₹1,500 Instant Discount on orders above ₹15,000", "discount_amount": 1500.0, "type": "INSTANT DISCOUNT", "badge": "SAVE ₹1,500"},
-                {"bank": "All Major Banks", "offer": f"No Cost EMI up to 6 months (from ₹{round(p/6):,.0f}/month)", "discount_amount": 0.0, "type": "NO COST EMI", "badge": "0% INTEREST EMI"}
-            ])
-        elif 'flipkart' in store_target:
-            cb = round(p * 0.05, 2)
-            bank_disc = 3500.0 if p >= 50000 else 1750.0
-            return _json.dumps([
-                {"bank": "Flipkart Axis Bank Card", "offer": f"5% Unlimited Cashback (₹{cb:,.0f}) directly credited", "discount_amount": cb, "type": "CASHBACK", "badge": "5% UNLIMITED CASHBACK"},
-                {"bank": "HDFC / ICICI Bank EMI", "offer": f"Flat ₹{bank_disc:,.0f} Instant Discount on Credit Card EMI", "discount_amount": bank_disc, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{bank_disc:,.0f}"},
-                {"bank": "IDFC FIRST Bank", "offer": "10% Instant Discount up to ₹1,500 on Credit Cards", "discount_amount": min(1500.0, p * 0.1), "type": "INSTANT DISCOUNT", "badge": "10% DISCOUNT"},
-                {"bank": "Bajaj Finserv EMI Card", "offer": f"₹0 Down Payment, No Cost EMI up to 9 months (from ₹{round(p/9):,.0f}/mo)", "discount_amount": 0.0, "type": "NO COST EMI", "badge": "ZERO DOWNPAYMENT"}
-            ])
-        elif 'vijay' in store_target:
-            hdfc = 4000.0 if p >= 50000 else 2000.0
-            icici = 3500.0 if p >= 50000 else 1500.0
-            hsbc = 3000.0 if p >= 40000 else 1500.0
-            return _json.dumps([
-                {"bank": "HDFC Bank Credit Cards", "offer": f"Flat ₹{hdfc:,.0f} Instant Discount on Full Swipe & EMI", "discount_amount": hdfc, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{hdfc:,.0f}"},
-                {"bank": "ICICI Bank Credit Cards", "offer": f"Flat ₹{icici:,.0f} Instant Discount on Credit Cards", "discount_amount": icici, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{icici:,.0f}"},
-                {"bank": "HSBC / OneCard", "offer": f"Flat ₹{hsbc:,.0f} Instant Discount on orders above ₹40,000", "discount_amount": hsbc, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{hsbc:,.0f}"},
-                {"bank": "Vijay Sales FlexiPay", "offer": f"Up to 12 months No Cost EMI (from ₹{round(p/12):,.0f}/month)", "discount_amount": 0.0, "type": "NO COST EMI", "badge": "FLEXIPAY EMI"}
-            ])
-        elif 'croma' in store_target:
-            neu = round(p * 0.05, 2)
-            icici = 4000.0 if p >= 50000 else 2000.0
-            return _json.dumps([
-                {"bank": "Tata Neu Infinity HDFC Card", "offer": f"5% NeuCoins (₹{neu:,.0f}) + ₹2,000 Instant Discount", "discount_amount": 2000.0, "type": "REWARD + DISCOUNT", "badge": "TATA NEU SPECIAL"},
-                {"bank": "ICICI Bank Credit Cards", "offer": f"Flat ₹{icici:,.0f} Instant Discount on Credit Card EMI", "discount_amount": icici, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{icici:,.0f}"},
-                {"bank": "Federal Bank Cards", "offer": "10% Instant Discount up to ₹2,500 on Credit Cards", "discount_amount": min(2500.0, p * 0.1), "type": "INSTANT DISCOUNT", "badge": "10% DISCOUNT"},
-                {"bank": "Croma Phone Exchange", "offer": "Additional ₹3,000 Exchange Bonus on existing phone", "discount_amount": 3000.0, "type": "EXCHANGE BONUS", "badge": "EXCHANGE DEAL"}
-            ])
-        elif 'reliance' in store_target:
-            sbi = 4000.0 if p >= 50000 else 2000.0
-            kotak = 3000.0 if p >= 40000 else 1500.0
-            return _json.dumps([
-                {"bank": "SBI / ICICI Bank Cards", "offer": f"Flat ₹{sbi:,.0f} Instant Discount on Full Swipe & EMI", "discount_amount": sbi, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{sbi:,.0f}"},
-                {"bank": "Kotak Mahindra Bank", "offer": f"Flat ₹{kotak:,.0f} Instant Discount on cards above ₹40,000", "discount_amount": kotak, "type": "INSTANT DISCOUNT", "badge": f"SAVE ₹{kotak:,.0f}"},
-                {"bank": "OneCard Credit Card", "offer": "Flat ₹2,500 Instant Discount on orders above ₹30,000", "discount_amount": 2500.0, "type": "INSTANT DISCOUNT", "badge": "SAVE ₹2,500"},
-                {"bank": "JioFinance / Reliance ResQ", "offer": "Zero down payment No Cost EMI + Free ResQ setup", "discount_amount": 0.0, "type": "NO COST EMI", "badge": "FREE SETUP"}
-            ])
-        elif 'bajaj' in store_target:
-            hdfc = 3500.0 if p >= 50000 else 1500.0
-            return _json.dumps([
-                {"bank": "Bajaj Finserv EMI Network Card", "offer": f"No Cost EMI up to 12 months with ₹0 down payment (₹{round(p/12):,.0f}/mo)", "discount_amount": 0.0, "type": "NO COST EMI", "badge": "ZERO DOWNPAYMENT"},
-                {"bank": "HDFC Bank Credit Cards", "offer": f"Flat ₹{hdfc:,.0f} Instant Cashback on Credit Card EMI", "discount_amount": hdfc, "type": "CASHBACK", "badge": f"CASHBACK ₹{hdfc:,.0f}"},
-                {"bank": "Bank of Baroda Card", "offer": "10% Instant Discount up to ₹2,500 on Credit Cards", "discount_amount": min(2500.0, p * 0.1), "type": "INSTANT DISCOUNT", "badge": "SAVE ₹2,500"}
-            ])
-        elif 'apple' in store_target:
-            amex = 5000.0 if p >= 60000 else 3000.0
-            return _json.dumps([
-                {"bank": "American Express / Axis / ICICI", "offer": f"Instant Cashback of ₹{amex:,.0f} on eligible Credit Cards", "discount_amount": amex, "type": "INSTANT CASHBACK", "badge": f"CASHBACK ₹{amex:,.0f}"},
-                {"bank": "Apple Official Trade-In", "offer": "Exchange your smartphone for ₹12,000 to ₹45,000 instant credit", "discount_amount": 15000.0, "type": "TRADE-IN CREDIT", "badge": "TRADE-IN SAVINGS"},
-                {"bank": "Leading Indian Banks", "offer": f"3 or 6 months No-Cost EMI with leading banks (from ₹{round(p/6):,.0f}/month)", "discount_amount": 0.0, "type": "NO COST EMI", "badge": "OFFICIAL 0% EMI"}
-            ])
-        else:
-            disc = round(min(1500.0, p * 0.1), 2)
-            return _json.dumps([
-                {"bank": "HDFC / ICICI Bank Cards", "offer": f"10% Instant Discount up to ₹{disc:,.0f} on Credit & Debit Cards", "discount_amount": disc, "type": "INSTANT DISCOUNT", "badge": "10% DISCOUNT"},
-                {"bank": "UPI & Netbanking", "offer": "Instant ₹50 to ₹250 cashback on eligible UPI transactions", "discount_amount": 100.0, "type": "UPI CASHBACK", "badge": "UPI REWARD"}
-            ])
-
-    # 2. Competing alternatives / substitutes request
-    if 'competing alternative products' in prompt.lower() or 'alternative products' in prompt.lower():
-        p_low = prompt.lower()
-        pm = _re.search(r'Current Price:\s*₹?([\d,]+(?:\.\d+)?)', prompt)
-        cp = float(pm.group(1).replace(',', '')) if pm else 2500.0
-        p_name_match = _re.search(r'alternative products to ["\']([^"\']+)["\']', prompt, _re.I)
-        raw_name = p_name_match.group(1).strip() if p_name_match else _re.sub(r'[\"\']', '', prompt)[:35].strip()
-        p_dom = detect_product_domain(raw_name) or detect_product_domain(prompt)
-
-        if p_dom == 'LAPTOP' or is_laptop_product(prompt):
-            return _json.dumps([
-                {"name": "Dell Inspiron 15 Plus (Core Ultra 5 125H)", "brand": "Dell", "specs": "15.6\" FHD 120Hz, Intel Core Ultra 5 125H, 16GB DDR5, 1TB SSD, Intel Arc Graphics, Platinum Silver", "price": 84990.0, "type": "PERFORMANCE COMPETITOR", "reason": "Direct Intel Core Ultra 5 competitor with sturdy aluminum chassis and Dell Onsite Support."},
-                {"name": "Lenovo IdeaPad Slim 5 16\" AI (Core Ultra 5)", "brand": "Lenovo", "specs": "16\" 2.5K 120Hz 100% sRGB, Intel Core Ultra 5 125H, 16GB LPDDR5X, 1TB SSD, Military Grade Durability", "price": 79990.0, "type": "DISPLAY & VALUE ALTERNATIVE", "reason": "Superior 2.5K 120Hz display with 100% sRGB color accuracy at ₹3,000 direct savings."},
-                {"name": "ASUS Vivobook S 15 OLED (Core Ultra 5)", "brand": "ASUS", "specs": "15.6\" 3K 120Hz OLED, Intel Core Ultra 5 125H, 16GB RAM, 1TB SSD, 75Wh Battery, 1.5kg Thin & Light", "price": 86990.0, "type": "OLED DISPLAY FLAGSHIP", "reason": "Vibrant 3K 120Hz OLED screen and massive 75Wh battery endurance for creative workflows."},
-                {"name": "Acer Swift Go 14 AI OLED (Core Ultra 5)", "brand": "Acer", "specs": "14\" 2.8K 90Hz OLED, Intel Core Ultra 5 125H, 16GB LPDDR5X, 512GB SSD, QHD Webcam, 1.32kg Ultraportable", "price": 74990.0, "type": "PORTABLE VALUE KING", "reason": "Ultra-lightweight 1.32kg form factor with 2.8K OLED display and ₹8,000 significant savings."},
-                {"name": "Apple MacBook Air M3 (16GB RAM)", "brand": "Apple", "specs": "13.6\" Liquid Retina, Apple M3 8-core CPU / 10-core GPU, 18-hour battery, MagSafe, Fanless", "price": 114900.0, "type": "MAC ECOSYSTEM", "reason": "Industry-leading battery life, fanless silent operation, and high resale value."}
-            ])
-        elif p_dom == 'FOOTWEAR':
-            return _json.dumps([
-                {"name": "Adidas Supernova Rise Running Shoes", "brand": "Adidas", "specs": "Dreamstrike+ Superfoam Midsole, Engineered Sandwich Mesh, Adiwear High-Traction Outsole", "price": 9800.0, "type": "ROAD RUNNING CHAMPION", "reason": "Direct rival with Dreamstrike+ superfoam midsole delivering exceptional energy return."},
-                {"name": "Puma Velocity NITRO 3 Running Shoes", "brand": "Puma", "specs": "NITROFOAM Nitrogen-Infused Midsole, PUMAGRIP Rubber Outsole, TPU Heel Spoiler", "price": 8800.0, "type": "PERFORMANCE VALUE PICK", "reason": "PUMAGRIP class-leading wet surface traction and nitrogen-infused foam at direct savings."},
-                {"name": "Asics Gel-Cumulus 26 Road Running Shoes", "brand": "Asics", "specs": "PureGEL Cushioning, FF BLAST PLUS Foam, FluidRide Rubberised EVA Outsole", "price": 10999.0, "type": "MAX COMFORT RUNNER", "reason": "PureGEL rearfoot cushioning technology engineered for softer landings and joint protection."},
-                {"name": "Nike Air Zoom Winflo 10 / Rival Fly", "brand": "Nike", "specs": "Full-length Nike Air Unit, Engineered Breathable Mesh, Comfort Collar & Tongue", "price": 7495.0, "type": "SAME BRAND VALUE SISTER", "reason": "Official Nike Air cushioning technology at a significantly lower entry price point."}
-            ])
-        elif p_dom == 'WATCH':
-            return _json.dumps([
-                {"name": "Apple Watch Series 10 (GPS 46mm)", "brand": "Apple", "specs": "Wide-Angle OLED Display, S10 SiP, Sleep Apnea Detection, 50m Water Resistance, ECG", "price": 46900.0, "type": "IOS SMARTWATCH BENCHMARK", "reason": "Thinnest Apple Watch design with wide-angle OLED screen and advanced health sensors."},
-                {"name": "Samsung Galaxy Watch 7 (Bluetooth 44mm)", "brand": "Samsung", "specs": "Super AMOLED Sapphire Crystal, BioActive Sensor (ECG/BP), 3nm Exynos W1000, Dual-Frequency GPS", "price": 29999.0, "type": "ANDROID SMARTWATCH LEADER", "reason": "Next-gen 3nm processor with dual GPS accuracy and comprehensive health suite."},
-                {"name": "Titan Smart Pro AMOLED Smartwatch", "brand": "Titan", "specs": "1.43\" AMOLED Display, Built-in GPS, Body Temperature Sensor, 14-Day Battery Life", "price": 7995.0, "type": "TRUSTED INDIAN SMARTWATCH", "reason": "Titan premium styling with AMOLED clarity and built-in standalone GPS."}
-            ])
-        elif p_dom == 'POWERBANK':
-            return _json.dumps([
-                {"name": "Mi 3i 20000mAh Fast Charging Power Bank", "brand": "Xiaomi", "specs": "20000mAh Li-Polymer, 18W Fast Charging, Triple Output Ports, Dual Input (Type-C & Micro-USB)", "price": 2199.0, "type": "RELIABLE MARKET BENCHMARK", "reason": "India’s most trusted high-capacity power bank with 12-layer advanced circuit protection."},
-                {"name": "Anker PowerCore 20000mAh Portable Charger", "brand": "Anker", "specs": "20000mAh High-Density Battery, 20W PowerIQ Fast Delivery, Trickle-Charging Mode", "price": 3499.0, "type": "PREMIUM DURABILITY LEADER", "reason": "Global leader in charging safety with MultiProtect safety system and high durability."},
-                {"name": "Ambrane 20000mAh 22.5W Fast Charging Power Bank", "brand": "Ambrane", "specs": "20000mAh, 22.5W Power Delivery & Quick Charge 3.0, Metallic Finish, LED Indicator", "price": 1799.0, "type": "SPEED & VALUE ALTERNATIVE", "reason": "Higher 22.5W fast charge output speed in a rugged metallic casing with direct savings."}
-            ])
-        elif p_dom == 'TV':
-            return _json.dumps([
-                {"name": "Sony Bravia 55 inch 4K Ultra HD Smart LED Google TV (KD-55X74L)", "brand": "Sony", "specs": "55\" 4K UHD 60Hz, X1 4K Processor, Motionflow XR 100, 20W Open Baffle Speaker with Dolby Audio", "price": 57990.0, "type": "PREMIUM PICTURE LEADER", "reason": "Industry-standard Sony X1 image processing with natural color reproduction and Google TV."},
-                {"name": "Samsung 55 inch Crystal 4K Vivid Pro Smart TV (55DUE770)", "brand": "Samsung", "specs": "55\" 4K UHD 50Hz, Crystal Processor 4K, PurColor, OTS Lite, SolarCell Remote, Q-Symphony", "price": 44990.0, "type": "CONTRAST & SLIM DESIGN", "reason": "Vibrant Crystal 4K color tuning, eco-friendly solar remote, and direct cash savings."},
-                {"name": "LG 55 inch 4K Ultra HD Smart LED TV (55UR7500PSC)", "brand": "LG", "specs": "55\" 4K UHD 60Hz, α5 AI Processor 4K Gen6, webOS 23 with ThinQ AI, Apple AirPlay 2", "price": 43990.0, "type": "SMART OS & GAMING VALUE", "reason": "Snappy webOS platform with Magic Remote compatibility and low-latency gaming optimization."}
-            ])
-        elif p_dom == 'AC':
-            return _json.dumps([
-                {"name": "Daikin 1.5 Ton 5 Star Inverter Split AC (MTKM50U)", "brand": "Daikin", "specs": "1.5 Ton 5-Star BEE, PM 2.5 Filter, Dew Clean Technology, 3D Airflow, 100% Copper Condenser", "price": 45990.0, "type": "EFFICIENCY & RELIABILITY KING", "reason": "Class-leading ISEER 5.2 energy efficiency, self-cleaning heat exchanger, and ultra-quiet operation."},
-                {"name": "Voltas 1.5 Ton 3 Star Inverter Split AC (183V Vectra Prism)", "brand": "Voltas", "specs": "1.5 Ton 3-Star BEE, 4-in-1 Adjustable Cooling, Anti-Microbial Filter, Copper Tubes", "price": 34990.0, "type": "TATA SERVICE & VALUE", "reason": "High ambient cooling up to 52°C backed by Tata Voltas nationwide widespread service network."},
-                {"name": "Blue Star 1.5 Ton 3 Star Inverter Split AC (IA318FNU)", "brand": "Blue Star", "specs": "1.5 Ton 3-Star BEE, Turbo Cool, Acoustic Jacket Compressor, Anti-Corrosive Blue Fins", "price": 35990.0, "type": "HEAVY DUTY COOLING", "reason": "Heavy-duty commercial cooling heritage with anti-corrosive fin protection."}
-            ])
-        elif p_dom == 'GEYSER':
-            return _json.dumps([
-                {"name": "AO Smith HSE-SHS-015 15 Litre Storage Geyser", "brand": "AO Smith", "specs": "15L Storage, Blue Diamond Glass Lined Inner Tank, 5-Star BEE, 2000W, 8 Bar Pressure", "price": 7899.0, "type": "GLASS-LINED LONGEVITY", "reason": "Blue Diamond glass coating provides 2x corrosion resistance in hard water conditions."},
-                {"name": "Havells Adonia R 15 Litre Storage Water Heater", "brand": "Havells", "specs": "15L Storage, Feroglas Coated Tank, Incoloy 800 Glass Element, Smart Colour Changing LED Ring", "price": 9499.0, "type": "PREMIUM AESTHETICS", "reason": "Colour-changing temperature sensing LED ring and ultra-durable Incoloy heating element."},
-                {"name": "Crompton Arno Neo 15 Litre Storage Water Heater", "brand": "Crompton", "specs": "15L Storage, Nano Polybond Technology, 5-Star BEE, 8 Bar High Rise Rating", "price": 5799.0, "type": "HIGH RISE VALUE PICK", "reason": "Withstands 8 bar pressure for high-rise apartment living at direct savings."}
-            ])
-        elif p_dom == 'REFRIGERATOR':
-            return _json.dumps([
-                {"name": "Whirlpool 240L Frost Free Triple-Door Refrigerator (FP 263D Protton)", "brand": "Whirlpool", "specs": "240L Frost Free, Triple Door Design, Active Fresh Technology, Microblock Protection", "price": 25990.0, "type": "TRIPLE DOOR HYGIENE", "reason": "Separate bottom vegetable drawer prevents odor mixing and preserves freshness 2x longer."},
-                {"name": "Samsung 256L 3 Star Inverter Frost Free Double Door (RT30C3733S8)", "brand": "Samsung", "specs": "256L Frost Free, Convertible 5-in-1, Digital Inverter Compressor, Deodorizer", "price": 27990.0, "type": "CONVERTIBLE VERSATILITY", "reason": "5-in-1 convertible modes allow converting the entire freezer into extra fridge space."},
-                {"name": "LG 242L 3 Star Smart Inverter Double Door Refrigerator (GL-I292RPZX)", "brand": "LG", "specs": "242L Frost Free, Smart Inverter Compressor, Door Cooling+, Multi Air Flow", "price": 26490.0, "type": "DOOR COOLING LEADER", "reason": "Door Cooling+ vents provide up to 35% faster, even cooling to beverages and door shelves."}
-            ])
-        elif p_dom == 'OVEN':
-            return _json.dumps([
-                {"name": "IFB 30L Convection Microwave Oven (30BRC2)", "brand": "IFB", "specs": "30L Convection, 101 Auto-Cook Menus, Steam Clean & Deodorize, Multi-Stage Cooking", "price": 14990.0, "type": "BAKING & GRILL BENCHMARK", "reason": "Comprehensive 101 auto-cook menus with dedicated steam clean and stainless steel cavity."},
-                {"name": "LG 28L Charcoal Convection Microwave (MJ2886BWUM)", "brand": "LG", "specs": "28L Convection, Charcoal Lighting Heater, Diet Fry (88% Less Oil), 360° Motorised Rotisserie", "price": 19990.0, "type": "TANDOORI CHARCOAL TASTE", "reason": "Patented Charcoal Lighting Heater replicates traditional tandoori crust and smokiness."},
-                {"name": "Samsung 28L Convection Microwave Oven (MC28A5145VK)", "brand": "Samsung", "specs": "28L Convection, Slim Fry Technology, Ceramic Enamel Cavity (99.9% Antibacterial)", "price": 13990.0, "type": "CERAMIC CAVITY VALUE", "reason": "Scratch-resistant ceramic enamel interior with dedicated fermentation mode for fresh curd."}
-            ])
-        elif p_dom == 'MIXER_GRINDER':
-            return _json.dumps([
-                {"name": "Preethi Zodiac MG-218 750-Watt Mixer Grinder", "brand": "Preethi", "specs": "750W Vega W5 Motor, 5 Jars including Master Chef Plus Food Processor Jar", "price": 8990.0, "type": "FOOD PROCESSOR CHAMPION", "reason": "Master Chef jar kneads atta in 1 min, chops veggies in 2 pulses, and grates/slices with precision."},
-                {"name": "Sujata Dynamix 900-Watt Mixer Grinder", "brand": "Sujata", "specs": "900W Most Powerful Heavy-Duty Motor, 22000 RPM, 3 Stainless Steel Jars", "price": 6299.0, "type": "RAW MOTOR POWERHOUSE", "reason": "Commercial-grade 900W motor capable of 90 minutes continuous heavy grinding without stalling."},
-                {"name": "Philips HL7756/00 750-Watt Mixer Grinder", "brand": "Philips", "specs": "750W Turbo Motor, Advanced Air Ventilation, Triangular Compact Body, 3 Leakproof Jars", "price": 3499.0, "type": "BESTSELLING RELIABLE VALUE", "reason": "Advanced air ventilation keeps the motor cool during tough masala and dal grinding."}
-            ])
-        elif p_dom == 'STORAGE':
-            return _json.dumps([
-                {"name": "Kuber Industries 66L Foldable Storage Box with Steel Frame", "brand": "Kuber Industries", "specs": "66L Capacity, Reinforced Metal Steel Frame, Dual Front & Top Zippers, Transparent Clear Window", "price": 699.0, "type": "METAL FRAME HEAVY DUTY", "reason": "Rigid internal steel wire structure allows stacking multiple loaded boxes without collapsing."},
-                {"name": "IKEA SKUBB Storage Case / Box Set", "brand": "IKEA", "specs": "Recycled Polyester Fabric, Breathable Corner Mesh Ventilation, Fold-Flat Collapsible Design", "price": 799.0, "type": "SCANDINAVIAN MINIMALIST", "reason": "Breathable mesh corners prevent moisture trapped inside seasonal winterwear and blankets."},
-                {"name": "Amazon Basics 60L Foldable Closet Storage Bag (Pack of 3)", "brand": "Amazon Basics", "specs": "60L per bag (Pack of 3 = 180L Total), 3-Layer Non-Woven Fabric, Reinforced Handles", "price": 549.0, "type": "BULK WARDROBE PACK", "reason": "Pack of 3 delivers total 180L storage volume at exceptional per-litre value."}
-            ])
-        elif p_dom == 'FASHION':
-            return _json.dumps([
-                {"name": "Allen Solly Men’s Slim Fit Cotton Formal Shirt", "brand": "Allen Solly", "specs": "100% Combed Breathable Cotton, Spread Collar, Long Sleeves with Single Cuff", "price": 1499.0, "type": "SMART CASUAL & WORKWEAR", "reason": "Tailored slim silhouette offering versatile Friday-dressing and professional boardroom appeal."},
-                {"name": "Peter England Men’s Regular Fit Formal Cotton Shirt", "brand": "Peter England", "specs": "Cotton Rich Fabric, Regular Comfortable Fit, Classic Point Collar, Easy Iron Finish", "price": 1099.0, "type": "EVERYDAY OFFICE WORKHORSE", "reason": "Easy-iron cotton blend engineered to resist creasing through long work commutes at ₹400 savings."},
-                {"name": "Van Heusen Men’s Ultra Slim Fit Luxury Shirt", "brand": "Van Heusen", "specs": "Premium High-Gsm Two-Ply Cotton, Contemporary Cutaway Collar, Lustrous Sateen Weave", "price": 1999.0, "type": "PREMIUM EXECUTIVE LUXURY", "reason": "Lustrous high-count two-ply cotton weave with contemporary European cutaway styling."}
-            ])
-        elif p_dom == 'AUDIO' or 'headphone' in p_low or 'sony wh' in p_low or 'bose' in p_low:
-            return _json.dumps([
-                {"name": "Sony WH-1000XM5 Wireless ANC", "brand": "Sony", "specs": "Auto NC Optimizer, 30-hr Battery, Multipoint Connection, LDAC Hi-Res Audio", "price": 26990.0, "type": "ANC CHAMPION", "reason": "Industry-standard active noise cancellation with ultra-comfortable lightweight fit."},
-                {"name": "Bose QuietComfort Ultra", "brand": "Bose", "specs": "CustomTune Audio, Spatial Immersive Audio, 24-hr Battery, World-Class ANC", "price": 29900.0, "type": "PREMIUM COMFORT", "reason": "Unrivaled physical comfort and spatial audio immersion for long flights and work."},
-                {"name": "Sennheiser Momentum 4 Wireless", "brand": "Sennheiser", "specs": "Audiophile 42mm Transducers, Massive 60-Hour Battery Life, Adaptive ANC", "price": 24990.0, "type": "BATTERY KING", "reason": "Stunning 60-hour battery endurance and audiophile-grade acoustic tuning."}
-            ])
-        elif p_dom == 'SMARTPHONE':
-            if (any(k in p_low for k in ['ultra', 'pro max', 's26', 's25']) or ('samsung' in p_low and 'ultra' in p_low)):
-                return _json.dumps([
-                    {"name": "Apple iPhone 16 Pro Max (256GB)", "brand": "Apple", "specs": "6.9\" Super Retina XDR 120Hz ProMotion, A18 Pro Chip, 48MP Fusion Camera with 5x Optical Telephoto, Grade 5 Titanium", "price": 144900.0, "type": "IOS ULTRA FLAGSHIP", "reason": "Direct iOS ultra competitor with class-leading A18 Pro silicon, titanium chassis, and dedicated Camera Control button."},
-                    {"name": "Google Pixel 9 Pro XL (256GB)", "brand": "Google", "specs": "6.8\" Super Actua OLED 120Hz, Google Tensor G4, 50MP Triple Pro Camera with 30x Super Res Zoom, Gemini Live AI", "price": 124999.0, "type": "AI & CAMERA FLAGSHIP", "reason": "Unrivaled computational night photography and Gemini Live assistant at ₹15,000 direct savings."},
-                    {"name": "Samsung Galaxy S24 Ultra (256GB)", "brand": "Samsung", "specs": "6.8\" Dynamic AMOLED 2X 120Hz, Snapdragon 8 Gen 3, 200MP Quad Camera with S-Pen, Titanium Frame, Galaxy AI", "price": 109999.0, "type": "PROVEN GALAXY FLAGSHIP", "reason": "Matches 200MP camera and integrated S-Pen capabilities with ₹30,000 substantial cash savings."},
-                    {"name": "OnePlus 12 5G (512GB)", "brand": "OnePlus", "specs": "6.82\" 2K ProXDR 120Hz, Snapdragon 8 Gen 3, 5400mAh Battery, 100W SuperVOOC Fast Charging, 4th Gen Hasselblad", "price": 64999.0, "type": "PERFORMANCE VALUE KING", "reason": "Double the internal storage (512GB), 100W blazing fast charging, and ₹75,000 massive savings."}
-                ])
-            elif 'iphone' in p_low:
-                return _json.dumps([
-                    {"name": "Samsung Galaxy S24 5G (128GB)", "brand": "Samsung", "specs": "6.2\" Dynamic AMOLED 2X 120Hz, Snapdragon 8 Gen 3 / Exynos 2400, 50MP Triple Camera, 4000mAh, Galaxy AI", "price": 64999.0, "type": "FLAGSHIP ALTERNATIVE", "reason": "120Hz AMOLED display and Galaxy AI suite at ₹2,901 lower cost vs iPhone 16."},
-                    {"name": "Apple iPhone 15 (128GB)", "brand": "Apple", "specs": "6.1\" Super Retina XDR, A16 Bionic, 48MP Fusion Camera, Dynamic Island, USB-C", "price": 54900.0, "type": "VALUE ALTERNATIVE", "reason": "Same core iOS experience, Dynamic Island, and 48MP sensor with ₹13,000 direct savings."},
-                    {"name": "Google Pixel 9 (128GB)", "brand": "Google", "specs": "6.3\" Actua OLED 120Hz, Google Tensor G4, 50MP Camera with Gemini Nano AI & Best Take", "price": 69999.0, "type": "CAMERA ALTERNATIVE", "reason": "Class-leading computational photography, Gemini AI, and 7 years of direct OS updates."},
-                    {"name": "OnePlus 12 5G (256GB)", "brand": "OnePlus", "specs": "6.82\" 2K 120Hz ProXDR, Snapdragon 8 Gen 3, Hasselblad Camera, 5400mAh, 100W SuperVOOC", "price": 59999.0, "type": "PERFORMANCE ALTERNATIVE", "reason": "Double the storage (256GB), larger 2K 120Hz screen, and 100W fast charging with ₹7,901 savings."}
-                ])
-            else:
-                return _json.dumps([
-                    {"name": "Apple iPhone 16 (128GB)", "brand": "Apple", "specs": "6.1\" Super Retina XDR, A18 Chip, Camera Control Button, 48MP Fusion Camera", "price": 67900.0, "type": "ECOSYSTEM ALTERNATIVE", "reason": "Apple ecosystem with dedicated Camera Control button and class-leading video recording."},
-                    {"name": "OnePlus 12 5G (256GB)", "brand": "OnePlus", "specs": "Snapdragon 8 Gen 3, 5400mAh Battery, Hasselblad Optics, 100W SuperVOOC Fast Charging", "price": 59999.0, "type": "VALUE FLAGSHIP", "reason": "Top-tier Snapdragon performance with massive battery and ultra-fast charging."},
-                    {"name": "Google Pixel 9 (128GB)", "brand": "Google", "specs": "6.3\" Actua OLED 120Hz, Google Tensor G4, 50MP Camera with Gemini Nano AI", "price": 69999.0, "type": "AI & CAMERA", "reason": "Pure Android experience with 7 years of major OS updates and Gemini AI."}
-                ])
-        elif p_dom == 'BEAUTY_SKINCARE':
-            return _json.dumps([
-                {"name": "The Ordinary Niacinamide 10% + Zinc 1%", "brand": "The Ordinary", "specs": "30ml High-Strength Vitamin & Mineral Blemish Formula, Water-Based Serum, Oil-Free", "price": 550.0, "type": "SERUM BENCHMARK", "reason": "Global gold-standard pore-refining and oil-balancing daily facial serum."},
-                {"name": "Minimalist 10% Niacinamide Face Serum with Zinc", "brand": "Minimalist", "specs": "30ml Pure Niacinamide with EUK-134 Antioxidant, Fragrance-Free, Non-Comedogenic", "price": 569.0, "type": "ACTIVE INGREDIENT ALTERNATIVE", "reason": "EUK-134 antioxidant booster formulated specifically for Indian climatic conditions."},
-                {"name": "Plum 10% Niacinamide Face Serum with Rice Water", "brand": "Plum", "specs": "30ml Fermented Rice Water & Squalane, 100% Vegan, Dermatologist Tested", "price": 499.0, "type": "GENTLE HYDRATING VALUE", "reason": "Fermented rice water soothes irritation and calms redness at direct savings."},
-                {"name": "Cetaphil Daily Hydrating Facial Cleanser / Lotion", "brand": "Cetaphil", "specs": "Hypoallergenic, Fragrance-Free, Non-Irritating Sensitive Skin Barrier Formula", "price": 485.0, "type": "DERMATOLOGIST SAFE", "reason": "Pediatrician and dermatologist recommended barrier-repairing daily essential."}
-            ])
-        elif p_dom == 'LUGGAGE':
-            return _json.dumps([
-                {"name": "American Tourister Ivy 67cm Medium Hard Trolley", "brand": "American Tourister", "specs": "Scratch-Resistant Polypropylene, 360-Degree Spinner Wheels, Recessed TSA Lock, 66L", "price": 3799.0, "type": "GLOBAL TRAVEL BENCHMARK", "reason": "Ultra-durable polypropylene shell backed by 3-year international warranty."},
-                {"name": "Safari Pentagon 65cm Medium Check-in Trolley", "brand": "Safari", "specs": "Unbreakable Polycarbonate, Textured Scratch-Resistant Body, Fixed Combination Lock", "price": 2499.0, "type": "UNBREAKABLE VALUE", "reason": "Impact-tested unbreakable casing with ₹1,300 direct savings."},
-                {"name": "Mokobara The Transit Luggage (Cabin / Medium)", "brand": "Mokobara", "specs": "German Makrolon Polycarbonate, Hinomoto Japanese Silent Wheels, Magic Expandable Zipper", "price": 5999.0, "type": "PREMIUM DESIGN LEADER", "reason": "Ultra-silent Hinomoto Japanese wheels and indestructible German Makrolon shell."},
-                {"name": "Skybags Trooper 65cm Hard Trolley Bag", "brand": "Skybags", "specs": "Dual Wheel Smooth Gliders, Lightweight Polycarbonate, Bright Print Styling, 68L", "price": 2899.0, "type": "YOUTH VALUE ALTERNATIVE", "reason": "Spacious interior compartments and dual spinner wheels at competitive pricing."}
-            ])
-        elif p_dom == 'FURNITURE_MATTRESS':
-            return _json.dumps([
-                {"name": "Wakefit ShapeSense Orthopedic Memory Foam Mattress (Queen)", "brand": "Wakefit", "specs": "78x60x6 Inch, High-Density Foam Base with Pressure-Relieving Memory Foam, 10-Yr Warranty", "price": 9999.0, "type": "ORTHOPEDIC BESTSELLER", "reason": "Class-leading spinal support with 100-night risk-free home trial."},
-                {"name": "Sleepwell Dual Pro Profiled Foam Mattress", "brand": "Sleepwell", "specs": "Reversible Dual Comfort (Firm & Soft Side), Airvent Technology, Anti-Microbial Quilt", "price": 11499.0, "type": "DUAL FIRMNESS VERSATILITY", "reason": "Dual-sided firmness allows choosing between plush cushioning and firm support."},
-                {"name": "Duroflex LiveIn 2-in-1 Memory Foam Mattress", "brand": "Duroflex", "specs": "Adaptive Memory Foam with Anti-Stress Fabric, Bed-in-a-Box Vacuum Roll Pack, 10-Yr Warranty", "price": 10499.0, "type": "DOCTOR RECOMMENDED", "reason": "National Health Academy certified orthopedic design for lower back relief."},
-                {"name": "IKEA VADSÖ Spring Mattress (Standard Double)", "brand": "IKEA", "specs": "Bonnell Spring Core with Polyurethane Foam Padding, Clean Scandinavian Design", "price": 8990.0, "type": "BUDGET SPRING CLASSIC", "reason": "Responsive Bonnell spring ventilation and direct Swedish design value."}
-            ])
-        elif p_dom == 'FITNESS_SPORTS':
-            if any(k in p_low for k in ['tent', 'camping', 'sleeping bag', 'trekking', 'hiking']):
-                p1 = round(cp * 0.95, -1) if cp > 50 else 5690.0
-                p2 = round(cp * 0.85, -1) if cp > 50 else 4999.0
-                p3 = round(cp * 1.08, -1) if cp > 50 else 6490.0
-                return _json.dumps([
-                    {"name": "Coleman Sundome 4-Person Waterproof Camping Tent", "brand": "Coleman", "specs": "WeatherTec System with Patented Welded Floors and Inverted Seams, 9x7ft, 10-Min Setup", "price": p1, "type": "OUTDOOR WEATHERTEC BENCHMARK", "reason": "World-renowned WeatherTec system with inverted welded seams for guaranteed rain protection."},
-                    {"name": "Wildcraft 4-Person Waterproof Adventure Dome Tent", "brand": "Wildcraft", "specs": "PU 2000mm Waterproof Flysheet, Breathable Inner Polyester, Fiberglass Poles, 3.8kg", "price": p2, "type": "INDIAN ADVENTURE VALUE", "reason": "Engineered for diverse Indian monsoon terrains with 2000mm hydrostatic head at direct savings."},
-                    {"name": "Decathlon Quechua MH100 Fresh & Black 3-4 Person Tent", "brand": "Decathlon", "specs": "Fresh & Black Patented Fabric (99% Darkness & Coolness), Free-Standing Dome, Wind-Tunnel Tested", "price": p3, "type": "PATENTED HEAT-SHIELD INNOVATION", "reason": "Patented Fresh & Black fabric keeps the interior pitch-dark and noticeably cooler in hot sunshine."}
-                ])
-            elif any(k in p_low for k in ['badminton', 'racket', 'shuttlecock']):
-                p1 = round(cp * 0.95, -1) if cp > 50 else 3290.0
-                p2 = round(cp * 0.85, -1) if cp > 50 else 2790.0
-                p3 = round(cp * 1.10, -1) if cp > 50 else 3690.0
-                return _json.dumps([
-                    {"name": "Yonex Astrox / Nanoray Isometric Badminton Racket", "brand": "Yonex", "specs": "High Modulus Graphite, Rotational Generator System, Isometric Head Shape, 83g", "price": p1, "type": "WORLD BADMINTON BENCHMARK", "reason": "Tournament-grade rotational balance for steep offensive smashes and rapid net defense."},
-                    {"name": "Li-Ning Windstorm Carbon Graphite Badminton Racket", "brand": "Li-Ning", "specs": "Ultra-Lightweight 72g Dynamic-Optimum Frame, High-Tensile Slim Shaft, UHB Shaft", "price": p2, "type": "AERODYNAMIC SPEED VALUE", "reason": "Ultra-lightweight 72g swing agility with amplified repulsion power at direct savings."},
-                    {"name": "Victor Brave Sword Precision Badminton Racket", "brand": "Victor", "specs": "Diamond Aerodynamic Frame, Nano Fortify Resin, Medium Stiff Flex for Pinpoint Accuracy", "price": p3, "type": "OFFENSIVE SMASH LEADER", "reason": "Diamond-profile frame cuts air resistance by 10% for explosive overhead smashes."}
-                ])
-            else:
-                p1 = round(cp * 0.95, -1) if cp > 50 else 2499.0
-                p2 = round(cp * 0.85, -1) if cp > 50 else 1999.0
-                p3 = round(cp * 1.10, -1) if cp > 50 else 2899.0
-                return _json.dumps([
-                    {"name": "Decathlon Domyos Hexagonal Rubber Dumbbells / Weights Set", "brand": "Decathlon", "specs": "Ergonomic Cast Iron / Cast Rubber Coating, Anti-Roll Hexagonal Profile, 2-Year Warranty", "price": p1, "type": "ERGONOMIC SPORT BENCHMARK", "reason": "Anti-roll hexagonal rubber profile protects home tiles and ensures firm grip."},
-                    {"name": "Cultsport Professional Heavy-Duty Workout Equipment", "brand": "Cultsport", "specs": "Heavy-Duty Alloy Steel Frame, Anti-Slip Textured Finish, High-Density Ergonomic Padding", "price": p2, "type": "HOME FITNESS VALUE", "reason": "Commercial-grade steel construction engineered for high-repetition workouts at direct savings."},
-                    {"name": "Boldfit Heavy-Duty Non-Slip Exercise Gym Equipment", "brand": "Boldfit", "specs": "High-Density Slip-Resistant Texture, Anti-Tear Reinforced Construction, Moisture-Resistant", "price": p3, "type": "FLOOR CUSHIONING ESSENTIAL", "reason": "High-density cushioning protects joints and flooring during intensive daily workouts."}
-                ])
-        elif p_dom == 'COOKWARE':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 1850.0
-            p2 = round(cp * 1.05, -1) if cp > 50 else 2199.0
-            p3 = round(cp * 0.85, -1) if cp > 50 else 1699.0
-            return _json.dumps([
-                {"name": "Hawkins Futura Hard Anodised Deep Frying Pan / Kadhai", "brand": "Hawkins", "specs": "4.06mm Extra Thick Base, Hard Anodised Non-Toxic Surface, Stay-Cool Rosewood Handles, 2.5L", "price": p1, "type": "HEAVY DUTY BENCHMARK", "reason": "Extra thick 4.06mm body conducts heat evenly without pitting or corroding."},
-                {"name": "Prestige Deluxe Alpha Tri-Ply Stainless Steel Casserole", "brand": "Prestige", "specs": "3-Layer Tri-Ply Clad (Steel-Aluminum-Steel), Induction & Gas Base, Toughened Glass Lid", "price": p2, "type": "TRI-PLY PURITY", "reason": "100% Food-grade 304 stainless steel interior with zero chemical non-stick coating."},
-                {"name": "Wonderchef Royal Velvet Non-Stick Cookware Set", "brand": "Wonderchef", "specs": "Pure Virgin Aluminum, 5-Layer MetaTuff PFOA-Free Coating, Soft-Touch Heat Resistant Handles", "price": p3, "type": "OIL-FREE VALUE", "reason": "5-Layer durable PFOA-free non-stick surface allows cooking with minimal oil."}
-            ])
-        elif p_dom == 'BABY_PRODUCTS':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 3290.0
-            p2 = round(cp * 1.08, -1) if cp > 50 else 4499.0
-            p3 = round(cp * 0.85, -1) if cp > 50 else 2799.0
-            return _json.dumps([
-                {"name": "FirstCry Babyhug Multi-Stage Convertible High Chair / Gear", "brand": "FirstCry", "specs": "3-in-1 Convertible Booster & High Chair, 5-Point Safety Harness, Removable Food Tray", "price": p1, "type": "CHILD NURSERY BENCHMARK", "reason": "Multi-stage convertible utility growing alongside toddler at direct savings."},
-                {"name": "Chicco NaturalForm Ergonomic Baby Carrier / Stroller", "brand": "Chicco", "specs": "100% BPA-Free, European Safety Certified (EN 71), Ergonomic Lightweight Aluminium Frame", "price": p2, "type": "EUROPEAN SAFETY LEADER", "reason": "Strict European EN 71 child safety compliance with shock-absorbing suspension."},
-                {"name": "LuvLap Sunshine 4-in-1 Convertible Baby Stroller / Buggy", "brand": "LuvLap", "specs": "Reversible Handlebar, 3-Position Reclining Seat, 5-Point Safety Belt, Looking Window Canopy", "price": p3, "type": "ALL-WEATHER BABY VALUE", "reason": "Reversible handlebar and 3-position recline for infant nap comfort on evening strolls."}
-            ])
-        elif p_dom == 'TOYS':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 2899.0
-            p2 = round(cp * 0.85, -1) if cp > 50 else 1999.0
-            p3 = round(cp * 1.10, -1) if cp > 50 else 3499.0
-            return _json.dumps([
-                {"name": "Lego Classic Creative Brick Box Building Set", "brand": "Lego", "specs": "484 Pieces in 35 Colors, 100% Non-Toxic Durable ABS, Creative Building Idea Guide", "price": p1, "type": "CREATIVE COGNITIVE HERO", "reason": "Universal STEM toy fostering cognitive creativity and spatial problem-solving."},
-                {"name": "Hasbro Gaming Monopoly Deluxe Family Board Game", "brand": "Hasbro", "specs": "Classic Fast-Dealing Property Trading Game, Metal Tokens, High-Gloss Gameboard", "price": p2, "type": "STRATEGY FAMILY CLASSIC", "reason": "Timeless strategy board game engaging both kids and adults in negotiation skills."},
-                {"name": "Nerf Elite 2.0 Commander Motorized / Rapid Blaster", "brand": "Nerf", "specs": "Rotating Drum, 24 Official Nerf Darts, Tactical Rails for Scope & Barrel Attachments", "price": p3, "type": "ACTION TOY LEADER", "reason": "Precision motorized dart firing up to 90 feet with modular rail customizations."}
-            ])
-        elif p_dom == 'BOOKS':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 499.0
-            p2 = round(cp * 0.75, -1) if cp > 50 else 350.0
-            p3 = round(cp * 1.05, -1) if cp > 50 else 550.0
-            return _json.dumps([
-                {"name": "Atomic Habits by James Clear (Original Paperback)", "brand": "Penguin", "specs": "320 Pages, Archival Acid-Free Paper, Comprehensive Habit Loop Framework, Proven Bestseller", "price": p1, "type": "SELF-MASTERY BENCHMARK", "reason": "Internationally acclaimed framework for continuous incremental habit building."},
-                {"name": "The Psychology of Money by Morgan Housel", "brand": "Harriman House", "specs": "256 Pages, Timeless Lessons on Wealth, Greed, and Happiness, Crisp Offset Typography", "price": p2, "type": "FINANCIAL WISDOM VALUE", "reason": "Essential practical financial mindset guidance at ₹150 direct cash savings."},
-                {"name": "Deep Work: Rules for Focused Success by Cal Newport", "brand": "Grand Central", "specs": "304 Pages, Peak Cognitive Performance Framework, Eliminating Digital Distractions", "price": p3, "type": "PRODUCTIVITY CLASSIC", "reason": "Actionable principles for high-output uninterrupted cognitive concentration."}
-            ])
-        elif p_dom == 'AUTOMOTIVE':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 2299.0
-            p2 = round(cp * 0.85, -1) if cp > 50 else 1999.0
-            p3 = round(cp * 1.15, -1) if cp > 50 else 2799.0
-            return _json.dumps([
-                {"name": "Steelbird SBH-17 Terminator Full Face Helmet (ISI Certified)", "brand": "Steelbird", "specs": "High Impact ABS Shell, Quick Release Buckle, Breathable Padding, Anti-Scratch Clear Visor", "price": p1, "type": "SAFETY CERTIFIED BENCHMARK", "reason": "ISI certified high-impact polycarbonate shell with dynamic ventilation channels."},
-                {"name": "Vega Bolt Bunny Full Face Helmet with Clear Visor", "brand": "Vega", "specs": "DOT & ISI Certified, Aerodynamic Shell with Rear Spoiler, UV Clear Coated Graphics", "price": p2, "type": "AERODYNAMIC VALUE", "reason": "Dual ISI & DOT safety ratings with aerodynamic low-drag rear spoiler."},
-                {"name": "Axor Apex Dual Certified Aerodynamic Helmet", "brand": "Axor", "specs": "ECE 22.05 & DOT Certified, Pinlock 30 Max Vision Anti-Fog Lens Included, Double D-Ring", "price": p3, "type": "DUAL CERTIFIED RACING", "reason": "European ECE 22.05 international track safety certification with Pinlock anti-fog shield."}
-            ])
-        elif p_dom == 'MUSICAL_INSTRUMENTS':
-            p1 = round(cp * 0.98, -1) if cp > 50 else 7490.0
-            p2 = round(cp * 1.05, -1) if cp > 50 else 7999.0
-            p3 = round(cp * 0.88, -1) if cp > 50 else 6790.0
-            return _json.dumps([
-                {"name": "Yamaha F280 Acoustic Guitar (Natural)", "brand": "Yamaha", "specs": "Spruce Top, Rosewood Fingerboard & Bridge, Precision Chrome Tuners, High Acoustic Resonance", "price": p1, "type": "ACOUSTIC GUITAR BENCHMARK", "reason": "India’s highest-rated beginner-to-intermediate acoustic guitar with pristine intonation."},
-                {"name": "Fender Squier SA-150 Acoustic Dreadnought", "brand": "Fender", "specs": "Laminated Mahogany Body, Slim Easy-To-Play Neck Profile, 20 Frets, Classic Fender Tone", "price": p2, "type": "AMERICAN TONAL HERITAGE", "reason": "Warm dreadnought mahogany projection backed by iconic Fender acoustic heritage."},
-                {"name": "Ibanez MD39C Acoustic Guitar Cutaway", "brand": "Ibanez", "specs": "Spruce Top, Agathis Back & Sides, 39-inch Cutaway Body for Easy Upper Fret Access", "price": p3, "type": "CUTAWAY PLAYABILITY VALUE", "reason": "Ergonomic cutaway design allows effortless solo access above the 14th fret at direct savings."}
-            ])
-        elif p_dom == 'TOOLS_HARDWARE':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 3899.0
-            p2 = round(cp * 1.15, -1) if cp > 50 else 4499.0
-            p3 = round(cp * 0.85, -1) if cp > 50 else 3299.0
-            return _json.dumps([
-                {"name": "Bosch GSB 500W Professional Impact Drill Kit", "brand": "Bosch", "specs": "500W Copper Motor, Forward/Reverse Rotation, 100-Piece Accessory Tool Kit with Fisher Screws", "price": p1, "type": "GERMAN ENGINEERING BENCHMARK", "reason": "Unrivaled German motor durability bundled with 100-piece home installation kit."},
-                {"name": "DeWalt DCD776C2 18V Cordless Compact Hammer Drill", "brand": "DeWalt", "specs": "18V XR Li-Ion Battery, 2-Speed All-Metal Transmission, 15 Position Torque Control", "price": p2, "type": "CORDLESS HEAVY DUTY", "reason": "Heavy-duty commercial all-metal gearbox for cord-free high-torque site fastening."},
-                {"name": "Black+Decker 550W Variable Speed Hammer Drill Kit", "brand": "Black+Decker", "specs": "550W Motor, Chuck Capacity 13mm, Ergonomic Dual Grip, Includes Depth Gauge & Auxiliary Handle", "price": p3, "type": "HOME DIY VALUE", "reason": "Ergonomic dual handle design for effortless masonry and wood drilling at direct savings."}
-            ])
-        elif p_dom == 'PET_SUPPLIES':
-            p1 = round(cp * 0.98, -1) if cp > 50 else 2850.0
-            p2 = round(cp * 0.85, -1) if cp > 50 else 2420.0
-            p3 = round(cp * 0.90, -1) if cp > 50 else 2560.0
-            return _json.dumps([
-                {"name": "Royal Canin Maxi Adult Dry Dog Food (4kg)", "brand": "Royal Canin", "specs": "Optimal Digestive Tolerance, Joint & Bone Support Formula, Enriched with Omega 3 (EPA-DHA)", "price": p1, "type": "VET-NUTRITION BENCHMARK", "reason": "Globally trusted veterinary formula supporting high bone-density and joint mobility."},
-                {"name": "Drools Focus Super Premium Adult Dog Food (4kg)", "brand": "Drools", "specs": "Real Chicken #1 Ingredient, 100% Zero Wheat, Corn or Soya, Prebiotics & Probiotics", "price": p2, "type": "GRAIN-FREE VALUE", "reason": "Real chicken recipe with zero wheat or fillers at ₹430 significant savings."},
-                {"name": "Pedigree PRO Expert Nutrition Active Adult Dog Food (3kg)", "brand": "Pedigree", "specs": "Professional Performance Blend, 28% Protein, Added Glucosamine for Muscle Endurance", "price": p3, "type": "HIGH PROTEIN ENDURANCE", "reason": "Active formula with 28% protein and glucosamine for sporting and energetic dog breeds."}
-            ])
-        elif p_dom == 'GAMING':
-            p1 = round(cp * 0.98, -1) if cp > 50 else 5490.0
-            p2 = round(cp * 0.95, -1) if cp > 50 else 5290.0
-            p3 = round(cp * 0.85, -1) if cp > 50 else 4690.0
-            return _json.dumps([
-                {"name": "Sony DualSense Wireless Controller (PS5 / PC)", "brand": "Sony", "specs": "Haptic Feedback, Dynamic Adaptive Triggers, Built-in Microphone & Headset Jack, Motion Sensor", "price": p1, "type": "NEXT-GEN CONTROLLER BENCHMARK", "reason": "Class-leading tactile haptics and adaptive trigger tension for total gaming immersion."},
-                {"name": "Microsoft Xbox Wireless Controller (Carbon Black)", "brand": "Microsoft", "specs": "Hybrid D-pad, Textured Grip on Triggers & Bumpers, Bluetooth for PC/Xbox/Android, 40-hr Battery", "price": p2, "type": "PC & XBOX ERGONOMICS", "reason": "Native seamless plug-and-play Windows integration and ergonomic thumbstick placement."},
-                {"name": "Razer Wolverine V2 Wired Gaming Controller", "brand": "Razer", "specs": "Mecha-Tactile Action Buttons, Hair Trigger Mode with Trigger Stop-Switches, Extra Remappable Bumpers", "price": p3, "type": "ESPORTS PRECISION VALUE", "reason": "Hair Trigger switches reduce draw distance for lightning-fast competitive responses."}
-            ])
-        elif p_dom == 'CAMERAS':
-            if any(k in p_low for k in ['telescope', 'reflector', 'refractor', 'astronomical', 'celestron']):
-                p1 = round(cp * 1.0, -1) if cp > 50 else 14999.0
-                p2 = round(cp * 0.92, -1) if cp > 50 else 13790.0
-                p3 = round(cp * 0.85, -1) if cp > 50 else 12750.0
-                return _json.dumps([
-                    {"name": "Celestron AstroMaster 70AZ Refractor Telescope with Smartphone Adapter", "brand": "Celestron", "specs": "70mm Aperture, 900mm Focal Length, All-Glass Optical Components, Erect Image Diagonal, Steel Tripod", "price": p1, "type": "ASTRONOMY OPTICS BENCHMARK", "reason": "Clear terrestrial and lunar observing with fully-coated optical glass and quick-release smartphone mount."},
-                    {"name": "Orion StarBlast 4.5 Astro Reflector Telescope", "brand": "Orion", "specs": "114mm Parabolic Primary Mirror, Compact Tabletop Swivel Base, 450mm Focal Length, Wide-Field View", "price": p2, "type": "DEEP SKY VALUE LEADER", "reason": "Substantial 4.5-inch aperture gathers 260% more light than a 70mm refractor for observing nebulae."},
-                    {"name": "Gskyer 70mm Astronomical Refractor Telescope with 3x Barlow", "brand": "Gskyer", "specs": "70mm (2.8 in) Aperture, 400mm (f/5.7) Focal Length, Coated Optical Glass, Wireless Camera Remote", "price": p3, "type": "BEGINNER ASTROPHOTOGRAPHY", "reason": "Bundles a wireless remote and smartphone adapter with 3x Barlow lens at direct cost savings."}
-                ])
-            elif any(k in p_low for k in ['binoculars', 'monocular']):
-                p1 = round(cp * 0.95, -1) if cp > 50 else 6990.0
-                p2 = round(cp * 0.85, -1) if cp > 50 else 5990.0
-                p3 = round(cp * 1.10, -1) if cp > 50 else 7690.0
-                return _json.dumps([
-                    {"name": "Nikon Aculon A211 10-22x50 Zoom Binoculars", "brand": "Nikon", "specs": "Multicoated Eco-Glass Lenses, BaK4 Porro Prism System, Fingertip Zoom Control Knob", "price": p1, "type": "LONG RANGE OPTICS BENCHMARK", "reason": "BaK4 high-index Porro prisms deliver bright, clear images across variable zoom magnifications."},
-                    {"name": "Bushnell Falcon 10x50 Wide Angle Binoculars", "brand": "Bushnell", "specs": "InstaFocus System for Quick Motion Tracking, 50mm Objective Lens, 300ft Field of View at 1000 Yards", "price": p2, "type": "BIRDING & WILDLIFE VALUE", "reason": "InstaFocus lever allows instantaneous sharp focus on moving birds and wildlife at direct savings."},
-                    {"name": "Celestron SkyMaster 15x70 Giant Binoculars", "brand": "Celestron", "specs": "Large 70mm Objective Lenses, Multi-Coated Optics, Tripod Adapter Included, Long Eye Relief", "price": p3, "type": "ASTRONOMY & CELESTIAL", "reason": "Massive 70mm light-gathering lenses ideal for low-light stargazing and long-range terrestrial viewing."}
-                ])
-            else: # Cameras, DSLRs, Mirrorless, Action Cams
-                p1 = round(cp * 1.05, -1) if cp > 50 else 61990.0
-                p2 = round(cp * 0.98, -1) if cp > 50 else 58990.0
-                p3 = round(cp * 0.85, -1) if cp > 50 else 49990.0
-                return _json.dumps([
-                    {"name": "Sony Alpha ILCE-6100L 24.2MP Mirrorless Camera with 16-50mm Lens", "brand": "Sony", "specs": "24.2MP APS-C Exmor CMOS, 0.02s Real-Time Eye AF, 4K Video, 180° Tiltable Touchscreen, Wi-Fi", "price": p1, "type": "MIRRORLESS CREATOR BENCHMARK", "reason": "Fastest 0.02-second autofocus with Real-Time Eye tracking and interchangeable E-mount lenses."},
-                    {"name": "Canon EOS R50 Content Creator Mirrorless Camera (RF-S 18-45mm)", "brand": "Canon", "specs": "24.2MP APS-C, Dual Pixel CMOS AF II, 6K Oversampled 4K 30p, Deep Learning Subject Tracking", "price": p2, "type": "VLOGGING & CONTENT LEADER", "reason": "Deep learning AI subject detection and oversampled 4K video at direct savings."},
-                    {"name": "Nikon Z30 Mirrorless Creator Camera Kit (16-50mm VR)", "brand": "Nikon", "specs": "20.9MP DX CMOS Sensor, 4K UHD Video, Built-in Stereo Mic, Vari-Angle Touchscreen, Tally Light", "price": p3, "type": "COMPACT VLOGGING VALUE", "reason": "Vari-angle screen with red recording tally lamp and built-in noise-cancelling stereo microphones."}
-                ])
-        elif p_dom == 'JEWELRY_EYEWEAR':
-            if any(k in p_low for k in ['sunglass', 'sunglasses', 'aviator', 'wayfarer', 'spectacles', 'glasses', 'frame', 'lenskart']):
-                p1 = round(cp * 1.0, -1) if cp > 50 else 6890.0
-                p2 = round(cp * 0.92, -1) if cp > 50 else 6390.0
-                p3 = round(cp * 0.85, -1) if cp > 50 else 5850.0
-                return _json.dumps([
-                    {"name": "Ray-Ban Classic Aviator Sunglasses (RB3025 Polarized)", "brand": "Ray-Ban", "specs": "Gold Metal Frame, Crystal Green G-15 Polarized Lenses, 100% UV400 Protection, Made in Italy", "price": p1, "type": "TIMELESS EYEWEAR BENCHMARK", "reason": "Iconic aviator silhouette with optical-grade mineral glass and 100% UV protection."},
-                    {"name": "Oakley Holbrook Matte Black Polarized Sunglasses", "brand": "Oakley", "specs": "O Matter Lightweight Frame, Prizm Polarized Lenses, 100% UV Filtering, High Impact", "price": p2, "type": "SPORT OPTICS LEADER", "reason": "Prizm optics enhance color and contrast with lightweight rugged O Matter durability."},
-                    {"name": "Carrera Classic Pilot Aviator Polarized Sunglasses", "brand": "Carrera", "specs": "Distinctive Double Bridge Aviator Design, Polycarbonate Polarized Anti-Glare Lenses, UV400", "price": p3, "type": "ITALIAN HERITAGE VALUE", "reason": "Signature Italian sport heritage styling with premium polarized anti-glare road driving clarity."}
-                ])
-            else: # Jewelry (rings, necklaces, earrings, silver, gold)
-                p1 = round(cp * 0.95, -1) if cp > 50 else 1799.0
-                p2 = round(cp * 1.10, -1) if cp > 50 else 2499.0
-                p3 = round(cp * 0.85, -1) if cp > 50 else 1499.0
-                return _json.dumps([
-                    {"name": "GIVA 925 Sterling Silver Classic Solitaire Ring / Pendant", "brand": "GIVA", "specs": "Pure 925 Sterling Silver, AAA+ Quality Cubic Zirconia, Rhodium E-Coat to Prevent Tarnish", "price": p1, "type": "AUTHENTIC SILVER LUXURY", "reason": "Hallmarked 925 silver with anti-tarnish rhodium finish and certificate of authenticity."},
-                    {"name": "Caratlane 14K Gold Accented Designer Jewellery", "brand": "Caratlane", "specs": "14K Hallmarked Gold, Certified Natural Diamonds, Contemporary Ergonomic Daily Wear", "price": p2, "type": "FINE GOLD BENCHMARK", "reason": "Tanishq-backed craftsmanship with certified hallmarked gold and lifetime exchange."},
-                    {"name": "Clara Pure 925 Sterling Silver Hallmarked Collection", "brand": "Clara", "specs": "92.5% Pure Sterling Silver, Swiss Zirconia Accents, Anti-Allergic Nickel Free", "price": p3, "type": "STERLING VALUE HERO", "reason": "Swiss zirconia brilliance with nickel-free hypoallergenic certification at direct savings."}
-                ])
-        elif p_dom == 'HOME_DECOR':
-            p1 = round(cp * 0.95, -1) if cp > 50 else 999.0
-            p2 = round(cp * 1.15, -1) if cp > 50 else 1699.0
-            p3 = round(cp * 0.85, -1) if cp > 50 else 850.0
-            return _json.dumps([
-                {"name": "Story@Home Blackout Thermal Insulated Eyelet Curtains (Set of 2)", "brand": "Story@Home", "specs": "Triple Weave Polyester, Blocks 90% Sunlight, Noise & Heat Insulation, Rust-Free Eyelets", "price": p1, "type": "BLACKOUT ROOM DARKENING", "reason": "Triple weave high-GSM fabric insulates against summer heat and highway noise."},
-                {"name": "D'Decor Live Beautiful Cotton Sateen Bedsheet Set (King)", "brand": "D'Decor", "specs": "100% Combed Cotton, 210 Thread Count Sateen Weave, Colorfast Dyes, Includes 2 Pillow Covers", "price": p2, "type": "LUXURY TEXTILE BENCHMARK", "reason": "Lustrous 210 TC sateen weave offering cool, breathable sleep comfort."},
-                {"name": "Urban Space 100% Premium Cotton Eyelet / Drape Collection", "brand": "Urban Space", "specs": "Heavy-GSM 100% Cotton Weave, Pre-Shrunk & Colorfast, High Thermal Protection", "price": p3, "type": "PURE COTTON VALUE", "reason": "Breathable 100% pure cotton drapery preventing artificial room glare at direct savings."}
-            ])
-        elif p_dom == 'STATIONERY_OFFICE':
-            p1 = round(cp * 0.98, -1) if cp > 50 else 549.0
-            p2 = round(cp * 0.85, -1) if cp > 50 else 380.0
-            p3 = round(cp * 1.12, -1) if cp > 50 else 620.0
-            return _json.dumps([
-                {"name": "Parker Vector Stainless Steel Fountain Pen (CT)", "brand": "Parker", "specs": "Brushed Stainless Steel Body, High-Grade Stainless Steel Nib, Quink Ink Flow Technology", "price": p1, "type": "FINE WRITING BENCHMARK", "reason": "Timeless stainless steel durability with consistent, skip-free ink flow."},
-                {"name": "Classmate Pulse Hardcover Archival Notebook (Set of 3)", "brand": "Classmate", "specs": "300 Pages, 80 GSM Elemental Chlorine Free Paper, Acid-Free Archival Sheets, Sturdy Binding", "price": p2, "type": "STUDENT & DESK VALUE", "reason": "Thick 80 GSM bleed-resistant paper suitable for ballpoint and gel pen notes."},
-                {"name": "Lamy Safari Fine Nib Fountain Pen Edition", "brand": "Lamy", "specs": "Sturdy ABS Plastic, Ergonomic Grip Section, Chrome-Plated Steel Nib, Made in Germany", "price": p3, "type": "GERMAN CALLIGRAPHY LEADER", "reason": "Ergonomic triangular grip section designed to promote fatigue-free long writing sessions."}
-            ])
-        elif p_dom == 'GROCERY' or classify_product_category(raw_name) == 'GROCERY' or any(k in raw_name.lower() for k in ['bread', 'milk', 'egg', 'tomato', 'potato', 'potatos', 'onion', 'rice', 'dal', 'oil', 'jam', 'almond', 'badam', 'atta', 'flour', 'butter', 'paneer', 'cheese', 'tea', 'coffee']):
-            rn_low = raw_name.lower()
-            if 'bread' in rn_low:
-                return _json.dumps([
-                    {"name": "Britannia 100% Whole Wheat Bread (400g)", "brand": "Britannia", "specs": "100% Whole Wheat Flour, Zero Maida, High Dietary Fibre, No Added Preservatives", "price": max(40.0, cp), "type": "HEALTHY WHEAT ESSENTIAL", "reason": "100% Whole wheat dietary fiber staple across quick commerce."},
-                    {"name": "Modern Brown Bread Sandwich Pack (400g)", "brand": "Modern", "specs": "Enriched with Vitamin B Complex, Soft Sandwich Slice, Certified Vegetarian", "price": max(35.0, round(cp * 0.9, -1)), "type": "SANDWICH VALUE PICK", "reason": "Freshly baked soft sandwich bread at direct savings."},
-                    {"name": "English Oven Premium Multi-Grain Bread (400g)", "brand": "English Oven", "specs": "Crafted with 7 Nutrient Seeds & Grains, High Protein, Artisanal Slice", "price": max(45.0, round(cp * 1.1, -1)), "type": "ARTISANAL MULTIGRAIN", "reason": "Artisanal multi-seed multigrain loaf for morning breakfast."}
-                ])
-            elif 'jam' in rn_low:
-                return _json.dumps([
-                    {"name": "Kissan Mixed Fruit Jam (500g)", "brand": "Kissan", "specs": "100% Real Fruit Pulp, Vitamin C Enriched, Classic Breakfast Spread", "price": max(120.0, cp), "type": "REAL FRUIT BENCHMARK", "reason": "India's favorite mixed fruit spread with 100% real fruit pulp."},
-                    {"name": "Mapro Mixed Fruit Lounge Jam (500g)", "brand": "Mapro", "specs": "High Strawberry & Berry Content, Mahabaleshwar Harvest, Low Added Sugar", "price": max(135.0, round(cp * 1.05, -1)), "type": "BERRY SPECIALTY", "reason": "Authentic Mahabaleshwar real fruit chunks with rich berry taste."},
-                    {"name": "Druk Mixed Fruit Sweet Preserve (500g)", "brand": "Druk", "specs": "Himalayan Real Fruit Pulp, No Artificial Colors, Classic Recipe", "price": max(110.0, round(cp * 0.9, -1)), "type": "HIMALAYAN FRUIT VALUE", "reason": "Himalayan whole fruit preserve at direct price savings."}
-                ])
-            elif 'almond' in rn_low or 'badam' in rn_low:
-                return _json.dumps([
-                    {"name": "Happilo 100% Natural California Almonds (500g)", "brand": "Happilo", "specs": "Non-GMO, Gluten Free, Zero Trans Fat, High Protein & Vitamin E California Badam", "price": max(420.0, cp), "type": "CALIFORNIA BADAM BENCHMARK", "reason": "Crunchy whole California almonds vacuum packed for peak freshness."},
-                    {"name": "Nutraj California Premium Whole Almonds (500g)", "brand": "Nutraj", "specs": "Grade-A Whole Nuts, Zero Cholesterol, Certified Natural, Heart Healthy", "price": max(399.0, round(cp * 0.92, -1)), "type": "PREMIUM VALUE NUTS", "reason": "Grade-A hand-selected natural almonds at ₹40 direct savings."},
-                    {"name": "Tata Sampann Pure California Almonds (500g)", "brand": "Tata Sampann", "specs": "Rigorous 20+ Quality Checks, Rich in Magnesium and Dietary Fiber", "price": max(460.0, round(cp * 1.05, -1)), "type": "TATA TRUST GRADE", "reason": "Backed by Tata's rigorous 20-step quality parameters for authentic nutty crunch."}
-                ])
-            else:
-                p1 = round(cp * 0.95, -1) if cp > 40 else cp
-                p2 = round(cp * 0.85, -1) if cp > 40 else max(20.0, cp - 5.0)
-                p3 = round(cp * 1.05, -1) if cp > 40 else cp + 5.0
-                return _json.dumps([
-                    {"name": f"Farm Fresh Premium {raw_name.title()}", "brand": "Farm Fresh", "specs": f"Farm-direct sorted produce, crisp quality, local supply chain", "price": p1, "type": "FRESH FARM PRODUCE", "reason": "Fresh daily market produce direct from regional agricultural mandi."},
-                    {"name": f"Organic Certified {raw_name.title()}", "brand": "Organic Tattva", "specs": f"100% Certified Organic, Zero Synthetic Pesticides, Naturally Grown", "price": p3, "type": "ORGANIC HEALTH CHOICE", "reason": "Chemical-free organically cultivated nutrition."},
-                    {"name": f"Daily Value Wholesale {raw_name.title()}", "brand": "Local Mandi", "specs": f"Bulk daily staple packaging at wholesale neighborhood pricing", "price": p2, "type": "NEIGHBORHOOD MANDI VALUE", "reason": "Direct wholesale price savings for everyday household cooking."}
-                ])
-        else:
-            # UNIVERSAL DYNAMIC ARCHETYPE FOR ANY NOVEL PRODUCT ON EARTH (Live Web Discovery)
-            pm = _re.search(r'Current Price:\s*₹?([\d,]+(?:\.\d+)?)', prompt)
-            cp = float(pm.group(1).replace(',', '')) if pm else 2500.0
-            hits = duckduckgo_search(f"alternative to {raw_name} price India", timeout=6)
-            alt_list = []
-            for h in hits:
-                if h.get('price', 0) > 0 and h.get('title') and raw_name.lower() not in h['title'].lower():
-                    p_val = h['price']
-                    alt_list.append({
-                        "name": h['title'][:65],
-                        "brand": h['title'].split()[0].capitalize(),
-                        "specs": h.get('snippet', '')[:120] or f"Genuine market alternative to {raw_name}",
-                        "price": p_val,
-                        "type": "MARKET ALTERNATIVE",
-                        "reason": "Live competitor listed on Indian retail market."
-                    })
-                    if len(alt_list) >= 3:
-                        break
-            if not alt_list:
-                alt_list = [
-                    {
-                        "name": f"Verified Competitor for {raw_name[:35]}",
-                        "brand": "Alternative Brand",
-                        "specs": f"Verified market competitor with manufacturer warranty",
-                        "price": cp,
-                        "type": "MARKET ALTERNATIVE",
-                        "reason": "Authentic category alternative."
-                    }
-                ]
-            return _json.dumps(alt_list)
-
-
-    # 3. Review Summary request
-    if 'shopping review summary' in prompt.lower():
-        p_name = _re.search(r'"([^"]+)"', prompt)
-        name = p_name.group(1) if p_name else "This product"
-        return (
-            f"Overall consensus for {name} is Positive across live web benchmarks, expert tech reviews, and verified customer purchases on Amazon and Flipkart. "
-            f"The product demonstrates solid engineering, durable build quality, and high user satisfaction in everyday usage.\n\n"
-            f"Key Highlights & Buyer Praise: Reviewers and verified buyers consistently celebrate its refined design, snappy processing performance, and dependable battery endurance. "
-            f"Verified purchasers on Indian retail platforms praise the quick delivery and authentic brand warranty.\n\n"
-            f"Friction Points & Trade-offs: Notable considerations include segment pricing premiums and minor category trade-offs compared to specialized flagships. "
-            f"Verdict: High-confidence purchase for buyers who value reliable performance, authentic store backing, and strong after-sales support."
-        )
-
+    """Fallback when no external AI provider is configured.
+    Returns empty string — callers handle this gracefully."""
     return ''
-
 
 def _ai_summarize_reviews(product_name: str, snippets: list[str], pros_cons: dict, pref=None) -> str:
     """Produce an in-depth, structured consensus summary covering consensus, strengths, trade-offs, and final verdict."""

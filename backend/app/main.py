@@ -248,6 +248,15 @@ def product_summary(db, pid, include_details: bool = True):
     all_coupons.append(cpn)
  all_coupons.sort(key=lambda x: x.get('discount_amount', 0), reverse=True)
  tradeoffs = compute_store_tradeoffs(out, all_coupons)
+ # Compute decision for Compare view
+ dec = {'decision': 'BUY', 'reason': 'Best available price verified across stores.'}
+ if include_details:
+  try:
+   dec_full = decision(best_item['true_total'], 0, [x['true_total'] for x in out], p_cat, p.name)
+   if dec_full and isinstance(dec_full, dict):
+    dec = {'decision': dec_full.get('decision', 'BUY'), 'reason': dec_full.get('reason', dec.get('reason', ''))}
+  except Exception:
+   pass
  return {
   'product_id':pid,
   'product':p.name,
@@ -257,6 +266,7 @@ def product_summary(db, pid, include_details: bool = True):
   'category':p_cat,
   'listings':sorted(out,key=lambda x:x['true_total']),
   'best':best_item,
+  'decision':dec,
   'substitutes':substitutes,
   'sustainability':sustainability,
   'coupons':all_coupons,
@@ -1246,7 +1256,7 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   gift_wrap=getattr(it, 'gift_wrap', False)
  )
  db.add(ord_rec)
- it.status = 'COMPLETED'
+ it.status = 'CHECKOUT_PENDING'
  it.completed_at = now() if hasattr(it, 'completed_at') else datetime.now(timezone.utc)
  db.add(AgentEvent(user_id=u.id, kind='Orders', message=f"Purchase initiated for {it.name} at {best.get('store', 'Partner')} (₹{total_price:,.2f}). User action required to complete. Verified savings: ₹{savings_val:,.2f}."))
  db.commit()
@@ -1294,6 +1304,7 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
    store_target_url = f"https://www.amazon.in/s?k={clean_q}"
  return {
   'status': 'PENDING_USER_ACTION',
+  'order_id': ord_rec.id,
   'order_number': order_num,
   'message': f"Opening {best.get('store', 'retailer')} to complete purchase (Saved ₹{savings_val:,.2f}).",
   'product': it.name,
@@ -1301,9 +1312,62 @@ def checkout(item_id:int,idempotency_key:str|None=Header(None,alias='Idempotency
   'url': store_target_url,
   'store_url': store_target_url,
   'total': total_price,
+  'savings': savings_val,
   'is_gift': ord_rec.is_gift,
   'gift_recipient': ord_rec.gift_recipient
  }
+
+@app.post('/api/orders/{order_id}/confirm')
+def confirm_order(order_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ o=db.query(Order).filter_by(id=order_id,user_id=u.id).first()
+ if not o:raise HTTPException(404,'Order not found')
+ o.status='CONFIRMED'
+ it=db.query(ShoppingItem).filter_by(id=o.item_id).first()
+ if it:
+  it.status='COMPLETED'
+  it.completed_at=datetime.now(timezone.utc)
+ db.add(AgentEvent(user_id=u.id,kind='Orders',message=f"Payment confirmed for {o.product_name} at {o.store}. Order {o.order_number} completed."))
+ db.commit()
+ return {'status':'CONFIRMED','order_number':o.order_number}
+
+@app.post('/api/orders/{order_id}/cancel')
+def cancel_order(order_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ o=db.query(Order).filter_by(id=order_id,user_id=u.id).first()
+ if not o:raise HTTPException(404,'Order not found')
+ o.status='CANCELLED'
+ it=db.query(ShoppingItem).filter_by(id=o.item_id).first()
+ if it and it.status in ('CHECKOUT_PENDING','COMPLETED'):
+  it.status='TODO'
+  it.completed_at=None
+ db.add(AgentEvent(user_id=u.id,kind='Orders',message=f"Checkout cancelled for {o.product_name}. Item returned to shopping list."))
+ db.commit()
+ return {'status':'CANCELLED','order_number':o.order_number}
+
+@app.get('/api/items/{item_id}/agent-checkout')
+def agent_checkout_stream(item_id:int,u=Depends(current_user),db:Session=Depends(get_db)):
+ """Launch purchase agent and return progress + result."""
+ from .purchase_agent import PurchaseAgent
+ it=db.query(ShoppingItem).join(ShoppingList).filter(ShoppingItem.id==item_id,ShoppingList.user_id==u.id).first()
+ if not it:raise HTTPException(404,'Item not found')
+ c=product_summary(db,it.product_id,include_details=False) if it.product_id else None
+ best=c.get('best',{}) if c else {}
+ store_url=best.get('url','')
+ store_name=best.get('store','')
+ task_id=f"purchase-{item_id}"
+ agent=PurchaseAgent(headless=False)
+ try:
+  result=agent.execute(store_url,store_name,it.name,task_id)
+  return {
+   'success':result.success,
+   'step_reached':result.step_reached,
+   'payment_url':result.payment_url,
+   'cart_url':result.cart_url,
+   'message':result.message,
+   'product':it.name,
+   'store':store_name
+  }
+ except Exception as e:
+  return {'success':False,'step_reached':'FAILED','message':str(e),'product':it.name,'store':store_name}
 
 @app.post('/api/invoices/scan')
 def scan_invoice(p:InvoiceScanIn,u=Depends(current_user),db:Session=Depends(get_db)):

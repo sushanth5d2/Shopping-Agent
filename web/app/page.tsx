@@ -611,28 +611,34 @@ export default function App() {
 
   const buy = async (id: number) => {
     setBusy(true);
-    // Pre-open a blank tab synchronously within user click event to bypass browser popup blockers
     let storeWindow: Window | null = null;
     try {
       storeWindow = window.open('about:blank', '_blank');
-    } catch {
-      // Handled if browser strictly disallows synchronous window.open
-    }
+    } catch {}
 
     try {
       const x = await req(`/api/items/${id}/checkout`, {
         method: 'POST',
         headers: { 'Idempotency-Key': crypto.randomUUID() }
       });
-      const targetUrl = x.store_url || x.url;
+      let targetUrl = x.store_url || x.url;
+
+      // Try purchase agent to get direct payment URL
+      let agentResult: any = null;
+      try {
+        agentResult = await req(`/api/items/${id}/agent-checkout`);
+        if (agentResult?.success && agentResult?.payment_url) {
+          targetUrl = agentResult.payment_url;
+        } else if (agentResult?.cart_url) {
+          targetUrl = agentResult.cart_url;
+        }
+      } catch {}
 
       if (targetUrl) {
         if (storeWindow && !storeWindow.closed) {
           storeWindow.location.href = targetUrl;
         } else {
-          try {
-            window.open(targetUrl, '_blank', 'noopener,noreferrer');
-          } catch {}
+          try { window.open(targetUrl, '_blank', 'noopener,noreferrer'); } catch {}
         }
       } else if (storeWindow && !storeWindow.closed) {
         storeWindow.close();
@@ -640,20 +646,21 @@ export default function App() {
 
       setCheckoutHandoff({
         orderNumber: x.order_number,
+        orderId: x.order_id,
         product: x.product || 'Product',
         store: x.store || 'Retail Partner',
         url: targetUrl,
         total: x.total,
         message: x.message,
-        savings: x.savings
+        savings: x.savings || 0,
+        agentStep: agentResult?.step_reached || 'MANUAL_HANDOFF',
+        agentMessage: agentResult?.message || ''
       });
 
       setToast(x.message || `Routing to ${x.store || 'retailer'}...`);
       await load();
     } catch (e: any) {
-      if (storeWindow && !storeWindow.closed) {
-        storeWindow.close();
-      }
+      if (storeWindow && !storeWindow.closed) { storeWindow.close(); }
       setToast(e.message);
     } finally {
       setBusy(false);
@@ -911,7 +918,7 @@ export default function App() {
         </div>
       </main>
       {activeReceipt && <ReceiptModal receipt={activeReceipt} onClose={() => setActiveReceipt(null)} />}
-      {checkoutHandoff && <CheckoutHandoffModal handoff={checkoutHandoff} onClose={() => setCheckoutHandoff(null)} />}
+      {checkoutHandoff && <CheckoutHandoffModal handoff={checkoutHandoff} onClose={() => setCheckoutHandoff(null)} onConfirm={async () => { try { if (checkoutHandoff.orderId) { await req(`/api/orders/${checkoutHandoff.orderId}/confirm`, { method: 'POST' }); } else { const orders = await req('/api/orders'); const latest = orders?.find?.((o: any) => o.order_number === checkoutHandoff.orderNumber); if (latest) await req(`/api/orders/${latest.id}/confirm`, { method: 'POST' }); } await load(); setToast('Payment confirmed! Order completed.'); } catch {} }} onCancel={async () => { try { if (checkoutHandoff.orderId) { await req(`/api/orders/${checkoutHandoff.orderId}/cancel`, { method: 'POST' }); } else { const orders = await req('/api/orders'); const latest = orders?.find?.((o: any) => o.order_number === checkoutHandoff.orderNumber); if (latest) await req(`/api/orders/${latest.id}/cancel`, { method: 'POST' }); } await load(); setToast('Checkout cancelled. Item returned to list.'); } catch {} }} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -2202,21 +2209,17 @@ function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [],
   const total = Number(data?.total || 0);
   const savings = Number(data?.savings || 0);
 
-  const handleCheckoutStore = (storeName: string) => {
+  const handleCheckoutStore = async (storeName: string) => {
     if (onCheckoutStore) {
       onCheckoutStore(storeName);
       return;
     }
     const storeItemIds = data?.store_items?.[storeName] || [];
-    let matched = todo.find((it: any) => storeItemIds.includes(it.id));
-    if (!matched) {
-      matched = todo.find((it: any) => {
-        const itemStore = (it.decision?.best_store || it.best_store || '').toLowerCase();
-        return itemStore.includes(storeName.toLowerCase());
-      }) || todo[0];
-    }
-    if (matched) {
-      buyItem(matched.id);
+    const matchedItems = todo.filter((it: any) => storeItemIds.includes(it.id) || (it.decision?.best_store || it.best_store || '').toLowerCase().includes(storeName.toLowerCase()));
+    if (matchedItems.length > 0) {
+      for (const item of matchedItems) { try { await buyItem(item.id); } catch {} }
+    } else if (todo[0]) {
+      buyItem(todo[0].id);
     }
   };
 
@@ -2381,8 +2384,8 @@ function MasterCartPage({ data, strategy, setStrategy, todo, savedForLater = [],
               <small style={{ color: '#22c55e', fontSize: 13 }}>Saved ₹{savings.toLocaleString()} vs single store</small>
             </div>
             {todo.length > 0 ? (
-              <button className="primary wide" onClick={() => buyItem(todo[0].id)}>
-                Proceed to Checkout Handoff <Zap size={14} />
+              <button className="primary wide" onClick={async () => { for (const t of todo) { try { await buyItem(t.id); } catch {} } }}>
+                Checkout All {todo.length} Items <Zap size={14} />
               </button>
             ) : (
               <button className="primary wide" disabled>
@@ -2642,9 +2645,9 @@ function ReceiptModal({ receipt, onClose }: any) {
       <div className="panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 640, width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: 16, marginBottom: 16 }}>
           <div>
-            <span className="eyebrow" style={{ color: '#22c55e' }}>ORIGINAL STORE TAX INVOICE & RECEIPT</span>
-            <h2 style={{ fontSize: 20, margin: '4px 0', color: '#fff' }}>Official Purchase Tax Receipt</h2>
-            <small style={{ color: '#94a3b8' }}>Verified directly against {receipt.seller} records • Date: {receipt.date}</small>
+            <span className="eyebrow" style={{ color: '#22c55e' }}>SHOPAGENT ORDER REFERENCE</span>
+            <h2 style={{ fontSize: 20, margin: '4px 0', color: '#fff' }}>ShopAgent Order Summary</h2>
+            <small style={{ color: '#94a3b8' }}>Internal order reference for {receipt.seller} • Date: {receipt.date}</small>
           </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}><X size={20} /></button>
         </div>
@@ -2721,7 +2724,7 @@ function ReceiptModal({ receipt, onClose }: any) {
   );
 }
 
-function CheckoutHandoffModal({ handoff, onClose }: any) {
+function CheckoutHandoffModal({ handoff, onClose, onConfirm, onCancel }: any) {
   if (!handoff) return null;
   const store = handoff.store || 'Retail Partner';
   const isAmazon = store.toLowerCase().includes('amazon');
@@ -2740,8 +2743,8 @@ function CheckoutHandoffModal({ handoff, onClose }: any) {
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
               <Zap size={13} /> Retailer Checkout Handoff Active
             </div>
-            <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: '#fff' }}>Proceed to Final Payment</h2>
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>ShopAgent verified lowest price and staged your purchase directly at the retailer.</p>
+            <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: '#fff' }}>Complete Your Purchase</h2>
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>ShopAgent found the best price and is helping you checkout at the retailer.</p>
           </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}><X size={20} /></button>
         </div>
@@ -2780,26 +2783,38 @@ function CheckoutHandoffModal({ handoff, onClose }: any) {
 
         {/* 3-Step Guided Action */}
         <div style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <h4 style={{ fontSize: 13, color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px', fontWeight: 700 }}>How Checkout Works:</h4>
+          <h4 style={{ fontSize: 13, color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px', fontWeight: 700 }}>Purchase Agent Progress:</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span style={{ background: '#3b82f6', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>1</span>
-              <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4 }}>
-                <strong>Store Tab:</strong> Click the button below to jump directly to <b>{store}</b>.
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span style={{ background: '#6366f1', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>2</span>
-              <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4 }}>
-                <strong>Cart & Delivery:</strong> The product is staged in your cart or search results. Choose your delivery address.
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span style={{ background: '#10b981', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>3</span>
-              <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4 }}>
-                <strong>Secure Payment:</strong> Select UPI, Credit/Debit Card, or Net Banking and authenticate with your personal 2FA/OTP.
-              </p>
-            </div>
+            {[
+              { step: 'NAVIGATING', label: 'Navigating to store', icon: '1' },
+              { step: 'PRODUCT_FOUND', label: 'Product page loaded', icon: '2' },
+              { step: 'ADDING_TO_CART', label: 'Adding to cart', icon: '3' },
+              { step: 'CART_CONFIRMED', label: 'Item in cart', icon: '4' },
+              { step: 'PAYMENT_READY', label: 'Payment page ready', icon: '5' },
+            ].map((s, i) => {
+              const steps = ['NAVIGATING', 'PRODUCT_FOUND', 'ADDING_TO_CART', 'CART_CONFIRMED', 'CHECKOUT_PAGE', 'PAYMENT_READY'];
+              const currentIdx = steps.indexOf(handoff.agentStep || 'MANUAL_HANDOFF');
+              const thisIdx = steps.indexOf(s.step);
+              const isDone = thisIdx <= currentIdx;
+              const isCurrent = s.step === handoff.agentStep;
+              const bg = isDone ? '#10b981' : isCurrent ? '#3b82f6' : '#334155';
+              return (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ background: bg, color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{isDone ? '✓' : s.icon}</span>
+                  <span style={{ fontSize: 13, color: isDone ? '#34d399' : '#94a3b8' }}>{s.label}</span>
+                </div>
+              );
+            })}
+            {handoff.agentStep === 'FAILED' && (
+              <div style={{ background: 'rgba(239,68,68,0.1)', padding: '8px 12px', borderRadius: 6, color: '#f87171', fontSize: 12 }}>
+                Agent could not auto-checkout. Please complete purchase manually on the store.
+              </div>
+            )}
+            {handoff.agentStep === 'MANUAL_HANDOFF' && (
+              <div style={{ background: 'rgba(59,130,246,0.1)', padding: '8px 12px', borderRadius: 6, color: '#60a5fa', fontSize: 12 }}>
+                Redirected to {store}. Find the product and complete checkout manually.
+              </div>
+            )}
           </div>
         </div>
 
@@ -2825,25 +2840,29 @@ function CheckoutHandoffModal({ handoff, onClose }: any) {
                 boxShadow: '0 4px 14px 0 rgba(99, 102, 241, 0.39)'
               }}
             >
-              <span>Open {store} &amp; Complete Payment</span>
+              <span>{handoff.agentStep === 'PAYMENT_READY' ? 'Complete Payment' : `Open ${store} & Complete Purchase`}</span>
               <ExternalLink size={18} />
             </a>
           ) : (
             <button className="primary wide" onClick={onClose}>
-              Order Staged • Awaiting Retailer Confirmation
+              Order Created • Awaiting Your Action
             </button>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-            <span style={{ fontSize: 11, color: '#64748b' }}>
-              Popups blocked? The button above opens store directly without popup blocker interference.
-            </span>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button
+              className="primary"
+              onClick={async () => { try { await onConfirm?.(); } catch {} onClose(); }}
+              style={{ flex: 1, padding: '10px 14px', fontSize: 13, borderRadius: 8, background: '#10b981', border: 'none', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+            >
+              ✓ I Completed Payment
+            </button>
             <button
               className="secondary"
-              onClick={onClose}
-              style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6 }}
+              onClick={async () => { try { await onCancel?.(); } catch {} onClose(); }}
+              style={{ flex: 1, padding: '10px 14px', fontSize: 13, borderRadius: 8, cursor: 'pointer' }}
             >
-              Dismiss
+              ✕ Cancel Checkout
             </button>
           </div>
         </div>
@@ -3267,30 +3286,30 @@ function Compare({ data, back, openDecisionLab, onSwap, onRefresh, refreshing, b
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 10px #22c55e' }} />
                 <span style={{ fontSize: 12, fontWeight: 800, color: '#f8fafc', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  AUTONOMOUS BROWSER AGENT · PLAYWRIGHT STEALTH ACTIVE
+                  LIVE PRICE COMPARISON ENGINE
                 </span>
               </div>
               <span style={{ fontSize: 11, color: '#94a3b8', background: '#1e293b', padding: '3px 8px', borderRadius: 6, border: '1px solid #334155' }}>
-                Chromium Engine v130 · Built-in Dual AI Loop
+                Prices sourced from Google Shopping & store websites
               </span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, marginTop: 4 }}>
               <div style={{ background: 'rgba(2, 6, 23, 0.6)', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(56, 189, 248, 0.2)' }}>
-                <div style={{ fontSize: 10, color: '#38bdf8', fontWeight: 700 }}>🌐 LIVE DOM EXTRACTION</div>
-                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>Direct URL Hydration Verified</div>
+                <div style={{ fontSize: 10, color: '#38bdf8', fontWeight: 700 }}>🌐 GOOGLE SHOPPING</div>
+                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>Real-time price search</div>
               </div>
               <div style={{ background: 'rgba(2, 6, 23, 0.6)', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(74, 222, 128, 0.2)' }}>
-                <div style={{ fontSize: 10, color: '#4ade80', fontWeight: 700 }}>💬 REVIEW INTELLIGENCE</div>
-                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>Verified Buyer Ratings &amp; Quotes</div>
+                <div style={{ fontSize: 10, color: '#4ade80', fontWeight: 700 }}>🏪 STORE SCRAPING</div>
+                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>Live prices from retailer sites</div>
               </div>
               <div style={{ background: 'rgba(2, 6, 23, 0.6)', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(251, 146, 60, 0.2)' }}>
-                <div style={{ fontSize: 10, color: '#fb923c', fontWeight: 700 }}>🏪 CROSS-STORE DISCOVERY</div>
-                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>7 Real Indian Retailers Synced</div>
+                <div style={{ fontSize: 10, color: '#fb923c', fontWeight: 700 }}>🔍 WEB SEARCH</div>
+                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>DuckDuckGo & Bing fallback</div>
               </div>
               <div style={{ background: 'rgba(2, 6, 23, 0.6)', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-                <div style={{ fontSize: 10, color: '#c084fc', fontWeight: 700 }}>💳 BANK &amp; CARD OFFERS</div>
-                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>Instant Discounts &amp; Cashback</div>
+                <div style={{ fontSize: 10, color: '#c084fc', fontWeight: 700 }}>🤖 PURCHASE AGENT</div>
+                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>Auto add-to-cart & checkout</div>
               </div>
             </div>
           </div>
