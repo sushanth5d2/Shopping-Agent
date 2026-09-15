@@ -13,7 +13,7 @@ from .models import *
 from .config import settings
 from .security import *
 from .services import *
-from .connectors import connector_for,ProductDiscoveryProvider,validate_public_url,ProductObservation
+from .connectors import connector_for,ProductDiscoveryProvider,validate_public_url,ProductObservation,parse_name_from_url
 from .checkout import ManualHandoffCheckoutAdapter
 from .notifications import telegram
 from .seed import seed_data, seed_user_defaults
