@@ -924,14 +924,34 @@ def batch_process(p:BatchIn,u=Depends(current_user),db:Session=Depends(get_db)):
 
 @app.post('/api/products/url-analyze')
 def url_analyze(p:UrlCompareIn,u=Depends(current_user),db:Session=Depends(get_db)):
+ # Try to extract a better name from URL keywords param (e.g. ?keywords=samsung+s26+ultra)
+ from urllib.parse import urlparse as _up, parse_qs as _pqs
+ _qs = _pqs(_up(p.url).query)
+ _kw_name = ''
+ for _k in ['keywords', 'k', 'q', 'query', 'search', 'searchTerm']:
+  if _k in _qs and _qs[_k] and _qs[_k][0].strip():
+   _kw_name = _qs[_k][0].strip()
+   break
  try:
   validate_public_url(p.url)
   source=connector_for(p.url).observe_url(p.url)
  except Exception as exc:
   clean_name = parse_name_from_url(p.url)
+  # Prefer keywords param over URL slug if available and slug looks generic
+  if _kw_name and len(_kw_name) > 3:
+   clean_name = ' '.join(w.capitalize() for w in _kw_name.replace('+', ' ').replace('-', ' ').split())
   if not clean_name or clean_name == 'Product Online':
    raise HTTPException(status_code=502, detail=f"Failed to extract product from {p.url}: {exc}")
   source=ProductObservation(name=clean_name, price=0.0, url=p.url, seller='Online Store', observed_live=False)
+
+ # If we have keywords and the source name looks like a slug, use keywords instead
+ if _kw_name and len(_kw_name) > 3 and source.name:
+  slug_name = source.name
+  kw_clean = ' '.join(w.capitalize() for w in _kw_name.replace('+', ' ').replace('-', ' ').split())
+  # Prefer keywords if source name has generic words like Storage/Privacy/Creative
+  from .services import detect_product_domain
+  if detect_product_domain(slug_name) == 'GENERAL' and detect_product_domain(kw_clean) != 'GENERAL':
+   source.name = kw_clean
 
  if not source or not source.name or source.name == 'Product Online':
   raise HTTPException(status_code=502, detail=f"Could not extract genuine product details from {p.url}. The retailer page may be unreachable or protected.")

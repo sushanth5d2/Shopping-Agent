@@ -738,6 +738,7 @@ def scrape_store_price(store_domain: str, product_query: str, timeout: int = 10)
     """Scrape real price from a specific Indian store using Playwright.
     Returns {'store': str, 'price': float, 'title': str, 'url': str, 'in_stock': bool} or None."""
     from urllib.parse import quote_plus
+    from bs4 import BeautifulSoup
     q = quote_plus(product_query)
     store_configs = {
         'amazon.in': {'search_url': f'https://www.amazon.in/s?k={q}', 'price_sel': ['.a-price-whole', '.a-offscreen'], 'title_sel': 'h2 a span, h2 span.a-text-normal', 'link_sel': 'h2 a.a-link-normal', 'base': 'https://www.amazon.in'},
@@ -1047,7 +1048,8 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
         h_price = hit.get('price', 0.0)
         if h_price <= 0:
             continue
-        if bp > 0 and (h_price < bp * 0.15 or h_price > bp * 5.0):
+        # Only filter by price range if base_price is reliable (not a fallback value)
+        if bp > 100 and (h_price < bp * 0.15 or h_price > bp * 5.0):
             continue
         for domain in target_stores:
             if domain in h_url and domain not in seen_stores:
@@ -1076,7 +1078,7 @@ def search_live_stores(category: str, query: str, base_price: float, pincode: st
         try:
             scraped = scrape_store_price(domain, clean_q, timeout=10)
             if scraped and scraped['price'] > 0:
-                if bp > 0 and (scraped['price'] < bp * 0.15 or scraped['price'] > bp * 5.0):
+                if bp > 100 and (scraped['price'] < bp * 0.15 or scraped['price'] > bp * 5.0):
                     continue
                 meta = store_registry.get(domain, {})
                 seen_stores.add(domain)
